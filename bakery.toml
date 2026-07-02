@@ -1,0 +1,12 @@
+name = "breadmon"
+description = "TUI monitor manager for Hyprland"
+binaries = ["breadmon"]
+system_deps = []
+optional_system_deps = ["hyprland"]
+bread_deps = []
+
+[config]
+dir = "~/.config/breadmon"
+
+[install]
+post_install = []
