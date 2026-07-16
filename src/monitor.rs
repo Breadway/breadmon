@@ -367,6 +367,15 @@ pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
 
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
         if stdout != "ok" {
+            if is_missing_eval_extension(&stdout) {
+                return Err(anyhow::anyhow!(
+                    "breadmon: `hyprctl eval` (and the `hl.monitor()` Lua extension it uses \
+                     to apply monitor changes) is not available on this compositor. \
+                     This feature requires BOS (Bread OS)'s patched Hyprland build — it \
+                     does not exist on vanilla/upstream Hyprland. See the breadmon README \
+                     for details. (raw hyprctl response: {stdout:?})"
+                ));
+            }
             return Err(anyhow::anyhow!("hyprctl: {}", stdout));
         }
     }
@@ -380,6 +389,37 @@ pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Vanilla/upstream Hyprland doesn't recognize the `eval` request at all
+/// (BOS's Hyprland fork adds it, along with the `hl.monitor()` Lua global
+/// used above), and responds with an "unknown request" style message rather
+/// than an error about `hl`. Detect that case so we can point the user at
+/// the actual cause instead of surfacing the raw hyprctl text.
+fn is_missing_eval_extension(hyprctl_stdout: &str) -> bool {
+    let s = hyprctl_stdout.to_lowercase();
+    s.contains("unknown request") || s.contains("unknown command")
+}
+
+#[cfg(test)]
+mod eval_extension_tests {
+    use super::is_missing_eval_extension;
+
+    #[test]
+    fn detects_unknown_request() {
+        assert!(is_missing_eval_extension("unknown request"));
+        assert!(is_missing_eval_extension("Unknown Request"));
+    }
+
+    #[test]
+    fn does_not_flag_lua_errors() {
+        // A real Lua/apply-time error from a BOS build should still surface
+        // as a normal hyprctl error, not the "requires BOS" message.
+        assert!(!is_missing_eval_extension(
+            "error: attempt to call a nil value"
+        ));
+        assert!(!is_missing_eval_extension("ok"));
+    }
 }
 
 #[cfg(test)]

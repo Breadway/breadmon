@@ -4,7 +4,8 @@ A terminal UI monitor manager for Hyprland. Lets you position, configure, and mi
 
 ## Requirements
 
-- Hyprland compositor (the `hyprctl` binary must be on `PATH`)
+- **[BOS (Bread OS)](https://git.breadway.dev/breadway/bos)'s patched Hyprland build.** Applying changes (the `a` key / Global keys "Apply") runs `hyprctl eval` with a `hl.monitor({...})` Lua call — a BOS-specific extension that does not exist on vanilla/upstream Hyprland. On a non-BOS Hyprland install, `hyprctl eval` itself is not a recognized request, and breadmon will fail to apply with an explicit error explaining this instead of the raw hyprctl response. Everything else in the TUI (viewing/arranging/saving profiles) works regardless; only the live-apply step needs BOS.
+- The `hyprctl` binary must be on `PATH`
 - Rust toolchain (to build from source)
 
 ## Build
