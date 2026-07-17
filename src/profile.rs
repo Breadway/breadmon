@@ -30,9 +30,14 @@ pub struct Profile {
 }
 
 pub fn profiles_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.config"))
-        .join("breadmon/profiles")
+    // Was `dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"))`
+    // — same literal-tilde-fallback bug found (and fixed) in breadclip-core
+    // and breadpad-shared during tonight's ecosystem-utils pass: PathBuf/
+    // std::fs never expand `~`, so on a box where `dirs` can't resolve a
+    // home directory this would silently resolve to a directory literally
+    // named `~` under the current working directory instead of the user's
+    // actual home.
+    bread_utils::xdg::config_dir("breadmon/profiles")
 }
 
 pub fn save(profile: &Profile) -> Result<()> {
