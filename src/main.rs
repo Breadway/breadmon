@@ -24,12 +24,6 @@ use tokio::{
 
 use ui::{AppState, StatusLevel};
 
-fn hyprland_socket2_path() -> Option<String> {
-    let instance = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok()?;
-    let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/1000".into());
-    Some(format!("{}/hypr/{}/.socket2.sock", runtime, instance))
-}
-
 #[derive(Debug)]
 enum AppEvent {
     Key(crossterm::event::KeyEvent),
@@ -104,7 +98,7 @@ async fn run(
     // Hyprland socket hotplug listener
     let tx_hotplug = tx.clone();
     tokio::spawn(async move {
-        if let Some(sig) = hyprland_socket2_path() {
+        if let Some(sig) = bread_utils::hypr::socket_path(bread_utils::hypr::Socket::Events) {
             if let Ok(mut stream) = tokio::net::UnixStream::connect(&sig).await {
                 use tokio::io::AsyncBufReadExt;
                 let reader = tokio::io::BufReader::new(&mut stream);
