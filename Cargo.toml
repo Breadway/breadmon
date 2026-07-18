@@ -1,6 +1,6 @@
 [package]
 name = "breadmon"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "TUI monitor manager for Hyprland"
 license = "MIT"
@@ -20,7 +20,7 @@ anyhow     = "1"
 dirs       = "5"
 futures    = "0.3"
 # TODO(owner): switch to tag-pinned git dependency once bread-utils is merged and tagged, matching the bread-theme pattern
-bread-utils = { path = "../bread-ecosystem-fix-worktree/bread-utils" }
+bread-utils = { git = "https://git.breadway.dev/Breadway/bread-ecosystem", tag = "v0.3.0" }
 
 [profile.release]
 lto = "thin"
