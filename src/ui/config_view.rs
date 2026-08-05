@@ -242,14 +242,14 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
                     state.dirty = true;
                 }
             }
-            KeyCode::Char('l') | KeyCode::Right => {
-                if state.config.res_idx + 1 < state.config.resolutions.len() {
-                    state.config.res_idx += 1;
-                    let m = &state.monitors[idx];
-                    state.config.update_refreshes(m);
-                    sync_mode_to_monitor(state, idx);
-                    state.dirty = true;
-                }
+            KeyCode::Char('l') | KeyCode::Right
+                if state.config.res_idx + 1 < state.config.resolutions.len() =>
+            {
+                state.config.res_idx += 1;
+                let m = &state.monitors[idx];
+                state.config.update_refreshes(m);
+                sync_mode_to_monitor(state, idx);
+                state.dirty = true;
             }
             _ => {}
         },
@@ -261,12 +261,12 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
                     state.dirty = true;
                 }
             }
-            KeyCode::Char('l') | KeyCode::Right => {
-                if state.config.refresh_idx + 1 < state.config.refreshes.len() {
-                    state.config.refresh_idx += 1;
-                    sync_mode_to_monitor(state, idx);
-                    state.dirty = true;
-                }
+            KeyCode::Char('l') | KeyCode::Right
+                if state.config.refresh_idx + 1 < state.config.refreshes.len() =>
+            {
+                state.config.refresh_idx += 1;
+                sync_mode_to_monitor(state, idx);
+                state.dirty = true;
             }
             _ => {}
         },
@@ -335,12 +335,12 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
                     state.dirty = true;
                 }
             }
-            KeyCode::Char('l') | KeyCode::Right => {
-                if state.config.mirror_idx + 1 < state.config.mirror_options.len() {
-                    state.config.mirror_idx += 1;
-                    sync_mirror_to_monitor(state, idx);
-                    state.dirty = true;
-                }
+            KeyCode::Char('l') | KeyCode::Right
+                if state.config.mirror_idx + 1 < state.config.mirror_options.len() =>
+            {
+                state.config.mirror_idx += 1;
+                sync_mirror_to_monitor(state, idx);
+                state.dirty = true;
             }
             _ => {}
         },

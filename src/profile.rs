@@ -108,7 +108,7 @@ pub fn from_monitors(name: &str, monitors: &[Monitor]) -> Profile {
 
 /// Apply a profile's settings onto a list of live monitors (matched by name).
 /// Monitors not in the profile are left unchanged.
-pub fn apply_to_monitors(profile: &Profile, monitors: &mut Vec<Monitor>) {
+pub fn apply_to_monitors(profile: &Profile, monitors: &mut [Monitor]) {
     for pm in &profile.monitors {
         if let Some(m) = monitors.iter_mut().find(|m| m.name == pm.name) {
             if let Some(mode) = Mode::parse(&format!("{}Hz", pm.mode)) {

@@ -259,9 +259,9 @@ pub fn canvas_area(terminal_size: (u16, u16)) -> Rect {
 }
 
 fn in_canvas(col: u16, row: u16, canvas: Rect) -> bool {
-    col >= canvas.x + 1
+    col > canvas.x
         && col < canvas.x + canvas.width.saturating_sub(1)
-        && row >= canvas.y + 1
+        && row > canvas.y
         && row < canvas.y + canvas.height.saturating_sub(1)
 }
 

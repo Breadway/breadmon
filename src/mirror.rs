@@ -62,11 +62,10 @@ pub fn find_mirror_modes(source: &Monitor, target: &Monitor) -> Option<MirrorRes
         // Approximate: check all source ARs within 5%
         for &s_ar in src_by_ar.keys() {
             let s_ratio = ratio_f64(s_ar);
-            if (s_ratio - tgt_ratio).abs() / s_ratio < 0.05 {
-                if !candidates.iter().any(|c| c.src_ar == s_ar && c.tgt_ar == tgt_ar) {
+            if (s_ratio - tgt_ratio).abs() / s_ratio < 0.05
+                && !candidates.iter().any(|c| c.src_ar == s_ar && c.tgt_ar == tgt_ar) {
                     candidates.push(Candidate { src_ar: s_ar, tgt_ar, is_exact: false });
                 }
-            }
         }
     }
 

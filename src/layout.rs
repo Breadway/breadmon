@@ -103,7 +103,7 @@ pub fn snap_position(
 }
 
 /// Move the selected monitor by (dx, dy) pixels, then snap.
-pub fn move_selected(state: &LayoutState, monitors: &mut Vec<Monitor>, dx: i32, dy: i32) {
+pub fn move_selected(state: &LayoutState, monitors: &mut [Monitor], dx: i32, dy: i32) {
     let idx = state.selected;
     if idx >= monitors.len() {
         return;
@@ -116,7 +116,7 @@ pub fn move_selected(state: &LayoutState, monitors: &mut Vec<Monitor>, dx: i32, 
 }
 
 /// Place monitors in a left-to-right row with no gaps.
-pub fn auto_arrange(monitors: &mut Vec<Monitor>) {
+pub fn auto_arrange(monitors: &mut [Monitor]) {
     let mut cursor = 0i32;
     for m in monitors.iter_mut() {
         m.x = cursor;
