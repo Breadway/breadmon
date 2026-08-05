@@ -210,33 +210,33 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
                         }
                     }
                 }
-                r if r >= 7 => {
+                r if r >= 7
                     // Result panel: Apply is on the line with buttons.
                     // Rough column check: col < 20 = Apply, col >= 20 = Cancel
-                    if state.mirror.result.is_some() {
-                        let col = event.column;
-                        if col < 20 {
-                            // Activate Apply
-                            state.mirror.focused = FIELDS.iter().position(|&f| f == MirrorField::Apply).unwrap_or(3);
-                            if let Some(result) = state.mirror.result.clone() {
-                                state.push_undo();
-                                let src_name = state.monitors[state.mirror.source_idx].name.clone();
-                                let tgt_idx = state.mirror.target_idx;
-                                state.monitors[tgt_idx].active_mode = result.mirror_mode.clone();
-                                state.monitors[tgt_idx].mirror_of = Some(src_name.clone());
-                                state.dirty = true;
-                                state.mirror.result = None;
-                                state.mirror.focused = 0;
-                                state.set_status(
-                                    format!("Mirror set: {} → {} at {}", src_name, state.monitors[tgt_idx].name, result.mirror_mode),
-                                    crate::ui::StatusLevel::Success,
-                                );
-                            }
-                        } else {
-                            // Cancel
+                    && state.mirror.result.is_some() =>
+                {
+                    let col = event.column;
+                    if col < 20 {
+                        // Activate Apply
+                        state.mirror.focused = FIELDS.iter().position(|&f| f == MirrorField::Apply).unwrap_or(3);
+                        if let Some(result) = state.mirror.result.clone() {
+                            state.push_undo();
+                            let src_name = state.monitors[state.mirror.source_idx].name.clone();
+                            let tgt_idx = state.mirror.target_idx;
+                            state.monitors[tgt_idx].active_mode = result.mirror_mode.clone();
+                            state.monitors[tgt_idx].mirror_of = Some(src_name.clone());
+                            state.dirty = true;
                             state.mirror.result = None;
                             state.mirror.focused = 0;
+                            state.set_status(
+                                format!("Mirror set: {} → {} at {}", src_name, state.monitors[tgt_idx].name, result.mirror_mode),
+                                crate::ui::StatusLevel::Success,
+                            );
                         }
+                    } else {
+                        // Cancel
+                        state.mirror.result = None;
+                        state.mirror.focused = 0;
                     }
                 }
                 _ => {}
