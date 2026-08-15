@@ -22,22 +22,22 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) {
         KeyCode::Char('h') | KeyCode::Left => {
             state.push_undo();
             move_selected(&state.layout, &mut state.monitors, -step, 0);
-            state.dirty = true;
+            state.mark_dirty();
         }
         KeyCode::Char('l') | KeyCode::Right => {
             state.push_undo();
             move_selected(&state.layout, &mut state.monitors, step, 0);
-            state.dirty = true;
+            state.mark_dirty();
         }
         KeyCode::Char('k') | KeyCode::Up => {
             state.push_undo();
             move_selected(&state.layout, &mut state.monitors, 0, -step);
-            state.dirty = true;
+            state.mark_dirty();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             state.push_undo();
             move_selected(&state.layout, &mut state.monitors, 0, step);
-            state.dirty = true;
+            state.mark_dirty();
         }
         KeyCode::Tab | KeyCode::Char('n') => state.layout.next(count),
         KeyCode::BackTab | KeyCode::Char('p') => state.layout.prev(count),
@@ -46,7 +46,7 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) {
         KeyCode::Char('0') => {
             state.push_undo();
             auto_arrange(&mut state.monitors);
-            state.dirty = true;
+            state.mark_dirty();
         }
         KeyCode::Enter => {
             state.config.sync_from_monitor(state.layout.selected, &state.monitors);
@@ -93,7 +93,7 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
                 let (sx, sy) = snap_position(idx, new_x, new_y, &state.monitors, state.layout.snap_threshold);
                 state.monitors[idx].x = sx;
                 state.monitors[idx].y = sy;
-                state.dirty = true;
+                state.mark_dirty();
             }
         }
         MouseEventKind::Up(MouseButton::Left) => {

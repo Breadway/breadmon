@@ -108,3 +108,7 @@ breadmon also listens on Hyprland's event socket and reloads the monitor list au
 Profiles are plain TOML files under `~/.config/breadmon/profiles/`. Each file records the monitor name, mode, position, scale, transform, VRR, DPMS, and mirror source. They are created and managed through the Profiles tab; there is no hand-written config file.
 
 This is not `~/.config/hypr/monitors.json`. That file is the persistent Hyprland layout edited by the `bos-settings` Display panel and applied on login/reload. breadmon never reads or writes it.
+
+## bread event integration
+
+breadmon works the same with or without `breadd`. After a successful live apply (`hyprctl eval 'hl.monitor({...})'` on BOS-patched Hyprland — not the `bos-settings` Display panel), it publishes `bread.mon.applied`. If breadd is down, the emit is a silent no-op; apply itself is unchanged. See [EVENTS.md](EVENTS.md) for the bus contract. `bread` is not a bakery dependency.

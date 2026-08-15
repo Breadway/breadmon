@@ -137,7 +137,7 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) {
                     state.monitors[tgt_idx].active_mode = result.mirror_mode.clone();
                     state.monitors[tgt_idx].mirror_of = Some(src_name.clone());
 
-                    state.dirty = true;
+                    state.mark_dirty();
                     state.mirror.result = None;
                     state.mirror.focused = 0;
                     state.set_status(
@@ -225,7 +225,7 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
                             let tgt_idx = state.mirror.target_idx;
                             state.monitors[tgt_idx].active_mode = result.mirror_mode.clone();
                             state.monitors[tgt_idx].mirror_of = Some(src_name.clone());
-                            state.dirty = true;
+                            state.mark_dirty();
                             state.mirror.result = None;
                             state.mirror.focused = 0;
                             state.set_status(

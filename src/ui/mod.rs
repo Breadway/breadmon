@@ -111,6 +111,10 @@ pub struct AppState {
     pub terminal_size: (u16, u16),
     /// Set to true by any handler that wants `main.rs` to run `apply_monitors`.
     pub pending_apply: bool,
+    /// Named snapshot last loaded or saved this session. Cleared when the
+    /// in-memory layout is edited, so `bread.mon.applied` can report it
+    /// honestly (or `null` for an ad-hoc layout).
+    pub active_profile: Option<String>,
     /// Snapshots for Ctrl+Z undo (up to 20 deep).
     pub undo_stack: Vec<Vec<Monitor>>,
 }
@@ -131,12 +135,21 @@ impl AppState {
             drag_state: None,
             terminal_size,
             pending_apply: false,
+            active_profile: None,
             undo_stack: Vec::new(),
         }
     }
 
     pub fn set_status(&mut self, text: impl Into<String>, level: StatusLevel) {
         self.status = Some(StatusMsg { text: text.into(), level, born: Instant::now() });
+    }
+
+    /// Mark the in-memory layout as edited. Also forgets `active_profile`
+    /// — a mutated layout is no longer the named snapshot that was loaded
+    /// or saved.
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+        self.active_profile = None;
     }
 
     pub fn tick_status(&mut self) {
@@ -166,7 +179,7 @@ impl AppState {
     pub fn undo(&mut self) {
         if let Some(snapshot) = self.undo_stack.pop() {
             self.monitors = snapshot;
-            self.dirty = true;
+            self.mark_dirty();
             self.layout.clamp_selected(self.monitors.len());
             // Re-sync config view to the restored state
             let idx = self.layout.selected;

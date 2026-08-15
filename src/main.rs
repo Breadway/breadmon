@@ -1,3 +1,4 @@
+mod bread_events;
 mod layout;
 mod mirror;
 mod monitor;
@@ -135,6 +136,7 @@ async fn run(
                 if let Ok(monitors) = monitor::load_monitors().await {
                     state.monitors = monitors;
                     state.layout.clamp_selected(state.monitors.len());
+                    state.active_profile = None;
                     state.set_status("Monitor configuration changed.", StatusLevel::Info);
                 }
             }
@@ -166,6 +168,7 @@ async fn run(
                                 state.monitors = monitors;
                                 state.layout.clamp_selected(state.monitors.len());
                                 state.dirty = false;
+                                state.active_profile = None;
                                 state.set_status("Monitors refreshed.", StatusLevel::Success);
                             }
                             Err(e) => {
@@ -189,6 +192,7 @@ async fn run(
             state.pending_apply = false;
             match monitor::apply_monitors(&state.monitors).await {
                 Ok(()) => {
+                    bread_events::emit_applied(state.active_profile.as_deref());
                     state.set_status("Applied.", StatusLevel::Success);
                 }
                 Err(e) => {

@@ -239,7 +239,7 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
                     let m = &state.monitors[idx];
                     state.config.update_refreshes(m);
                     sync_mode_to_monitor(state, idx);
-                    state.dirty = true;
+                    state.mark_dirty();
                 }
             }
             KeyCode::Char('l') | KeyCode::Right
@@ -249,7 +249,7 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
                 let m = &state.monitors[idx];
                 state.config.update_refreshes(m);
                 sync_mode_to_monitor(state, idx);
-                state.dirty = true;
+                state.mark_dirty();
             }
             _ => {}
         },
@@ -258,7 +258,7 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
                 if state.config.refresh_idx > 0 {
                     state.config.refresh_idx -= 1;
                     sync_mode_to_monitor(state, idx);
-                    state.dirty = true;
+                    state.mark_dirty();
                 }
             }
             KeyCode::Char('l') | KeyCode::Right
@@ -266,7 +266,7 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
             {
                 state.config.refresh_idx += 1;
                 sync_mode_to_monitor(state, idx);
-                state.dirty = true;
+                state.mark_dirty();
             }
             _ => {}
         },
@@ -276,14 +276,14 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
                 state.monitors[idx].scale = (s * 100.0).round() / 100.0;
                 state.monitors[idx].scale = state.monitors[idx].scale.max(0.1);
                 state.config.scale_str = format!("{:.2}", state.monitors[idx].scale);
-                state.dirty = true;
+                state.mark_dirty();
             }
             KeyCode::Char('.') => {
                 let s = state.monitors[idx].scale + 0.1;
                 state.monitors[idx].scale = (s * 100.0).round() / 100.0;
                 state.monitors[idx].scale = state.monitors[idx].scale.min(10.0);
                 state.config.scale_str = format!("{:.2}", state.monitors[idx].scale);
-                state.dirty = true;
+                state.mark_dirty();
             }
             KeyCode::Char(c) if c.is_ascii_digit() || c == '.' => {
                 state.config.scale_editing = true;
@@ -303,27 +303,27 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
                     .checked_sub(1)
                     .unwrap_or(all.len() - 1);
                 state.monitors[idx].transform = all[state.config.transform_idx];
-                state.dirty = true;
+                state.mark_dirty();
             }
             KeyCode::Char('l') | KeyCode::Right => {
                 let all = Transform::all();
                 state.config.transform_idx = (state.config.transform_idx + 1) % all.len();
                 state.monitors[idx].transform = all[state.config.transform_idx];
-                state.dirty = true;
+                state.mark_dirty();
             }
             _ => {}
         },
         ConfigField::Vrr => match event.code {
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
                 state.monitors[idx].vrr = !state.monitors[idx].vrr;
-                state.dirty = true;
+                state.mark_dirty();
             }
             _ => {}
         },
         ConfigField::Dpms => match event.code {
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
                 state.monitors[idx].dpms = !state.monitors[idx].dpms;
-                state.dirty = true;
+                state.mark_dirty();
             }
             _ => {}
         },
@@ -332,7 +332,7 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
                 if state.config.mirror_idx > 0 {
                     state.config.mirror_idx -= 1;
                     sync_mirror_to_monitor(state, idx);
-                    state.dirty = true;
+                    state.mark_dirty();
                 }
             }
             KeyCode::Char('l') | KeyCode::Right
@@ -340,7 +340,7 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
             {
                 state.config.mirror_idx += 1;
                 sync_mirror_to_monitor(state, idx);
-                state.dirty = true;
+                state.mark_dirty();
             }
             _ => {}
         },
@@ -370,7 +370,7 @@ fn commit_scale(state: &mut AppState) {
     if let Ok(v) = state.config.scale_str.parse::<f64>() {
         state.monitors[idx].scale = v.clamp(0.1, 10.0);
         state.config.scale_str = format!("{:.2}", state.monitors[idx].scale);
-        state.dirty = true;
+        state.mark_dirty();
     }
     state.config.scale_editing = false;
 }

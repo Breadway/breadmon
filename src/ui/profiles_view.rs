@@ -240,6 +240,7 @@ fn do_save(state: &mut AppState) {
         Ok(()) => {
             state.profiles.new_name.clear();
             state.profiles.refresh();
+            state.active_profile = Some(name.clone());
             state.set_status(format!("Saved profile '{}'", name), StatusLevel::Success);
         }
         Err(e) => {
@@ -254,6 +255,7 @@ fn do_load(state: &mut AppState) {
         Ok(p) => {
             profile::apply_to_monitors(&p, &mut state.monitors);
             state.dirty = true;
+            state.active_profile = Some(name.clone());
             state.set_status(
                 format!("Loaded profile '{}'. Press [a] to apply.", name),
                 StatusLevel::Success,
