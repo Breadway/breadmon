@@ -31,4 +31,3 @@ logs/
 *.pid
 
 # Local hygiene notes (not for commit)
-CLAUDE.md
