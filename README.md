@@ -1,26 +1,30 @@
 # breadmon
 
-A terminal UI monitor manager for Hyprland. Lets you position, configure, and mirror displays interactively, then apply changes live via `hyprctl`.
+A terminal UI monitor manager for Hyprland. Lets you position, configure, and mirror displays interactively, then apply a live layout on [BOS](https://git.breadway.dev/breadway/bos)-patched Hyprland.
+
+breadmon is **not** the Display panel in `bos-settings`. That panel edits `~/.config/hypr/monitors.json` (Hyprland's login/reload layout store). breadmon keeps its own named snapshots as TOML under `~/.config/breadmon/profiles/` and applies them live through BOS Hyprland. The two stores are independent — changing one does not update the other.
 
 ## Requirements
 
-- **[BOS (Bread OS)](https://git.breadway.dev/breadway/bos)'s patched Hyprland build.** Applying changes (the `a` key / Global keys "Apply") runs `hyprctl eval` with a `hl.monitor({...})` Lua call — a BOS-specific extension that does not exist on vanilla/upstream Hyprland. On a non-BOS Hyprland install, `hyprctl eval` itself is not a recognized request, and breadmon will fail to apply with an explicit error explaining this instead of the raw hyprctl response. Everything else in the TUI (viewing/arranging/saving profiles) works regardless; only the live-apply step needs BOS.
+- **[BOS (Bread OS)](https://git.breadway.dev/breadway/bos)'s patched Hyprland build** for live apply. The `a` key runs `hyprctl eval 'hl.monitor({...})'` — a BOS-specific Lua extension. Vanilla/upstream Hyprland has no `eval` request and no `hl.monitor()`, so apply will fail there with an explicit error instead of the raw hyprctl response. Viewing, arranging, and saving profiles work on any Hyprland; only live apply needs BOS.
 - The `hyprctl` binary must be on `PATH`
 - Rust toolchain (to build from source)
 
-## Build
+## Install
+
+Via [bakery](https://git.breadway.dev/Breadway/bread-ecosystem), the bread ecosystem package manager:
+
+```
+bakery install breadmon
+```
+
+Or build from source:
 
 ```
 cargo build --release
 ```
 
 The binary is written to `target/release/breadmon`.
-
-If you use the bread ecosystem, `bakery` can install it instead:
-
-```
-bread modules install /path/to/breadmon
-```
 
 ## Usage
 
@@ -91,7 +95,7 @@ Profiles are saved to `~/.config/breadmon/profiles/`.
 
 | Key | Action |
 |-----|--------|
-| `a` | Apply current configuration via `hyprctl` |
+| `a` | Apply current configuration via `hyprctl eval 'hl.monitor({...})'` (BOS-patched Hyprland only) |
 | `s` | Save current configuration as a profile |
 | `r` | Refresh monitor list from Hyprland |
 | `Ctrl+Z` | Undo last change (up to 20 steps) |
@@ -102,3 +106,5 @@ breadmon also listens on Hyprland's event socket and reloads the monitor list au
 ## Config
 
 Profiles are plain TOML files under `~/.config/breadmon/profiles/`. Each file records the monitor name, mode, position, scale, transform, VRR, DPMS, and mirror source. They are created and managed through the Profiles tab; there is no hand-written config file.
+
+This is not `~/.config/hypr/monitors.json`. That file is the persistent Hyprland layout edited by the `bos-settings` Display panel and applied on login/reload. breadmon never reads or writes it.

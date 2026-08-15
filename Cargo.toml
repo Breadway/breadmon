@@ -19,8 +19,7 @@ toml       = "0.8"
 anyhow     = "1"
 dirs       = "5"
 futures    = "0.3"
-# TODO(owner): switch to tag-pinned git dependency once bread-utils is merged and tagged, matching the bread-theme pattern
-bread-utils = { git = "https://git.breadway.dev/Breadway/bread-ecosystem", tag = "v0.3.0" }
+bread-utils = { git = "https://git.breadway.dev/Breadway/bread-ecosystem", tag = "v0.7.1" }
 
 [profile.release]
 lto = "thin"
