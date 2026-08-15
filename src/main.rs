@@ -3,6 +3,7 @@ mod layout;
 mod mirror;
 mod monitor;
 mod profile;
+mod store;
 mod ui;
 
 use std::io;
@@ -10,8 +11,7 @@ use std::io;
 use anyhow::Result;
 use crossterm::{
     event::{
-        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind,
-        MouseEventKind,
+        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind, MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -36,10 +36,15 @@ enum AppEvent {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let monitors = monitor::load_monitors().await.unwrap_or_else(|e| {
+    let mut monitors = monitor::load_monitors().await.unwrap_or_else(|e| {
         eprintln!("Warning: could not load monitors: {}", e);
         vec![]
     });
+    match store::load() {
+        Ok(Some(file)) => store::apply_to_monitors(&file, &mut monitors),
+        Ok(None) => {}
+        Err(e) => eprintln!("Warning: could not load monitors.json: {}", e),
+    }
 
     // Terminal setup
     enable_raw_mode()?;
@@ -52,7 +57,11 @@ async fn main() -> Result<()> {
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     result
@@ -162,23 +171,18 @@ async fn run(
                     crossterm::event::KeyCode::Char('s') => {
                         ui::layout_view::trigger_save(&mut state);
                     }
-                    crossterm::event::KeyCode::Char('r') => {
-                        match monitor::load_monitors().await {
-                            Ok(monitors) => {
-                                state.monitors = monitors;
-                                state.layout.clamp_selected(state.monitors.len());
-                                state.dirty = false;
-                                state.active_profile = None;
-                                state.set_status("Monitors refreshed.", StatusLevel::Success);
-                            }
-                            Err(e) => {
-                                state.set_status(
-                                    format!("Refresh failed: {}", e),
-                                    StatusLevel::Error,
-                                );
-                            }
+                    crossterm::event::KeyCode::Char('r') => match monitor::load_monitors().await {
+                        Ok(monitors) => {
+                            state.monitors = monitors;
+                            state.layout.clamp_selected(state.monitors.len());
+                            state.dirty = false;
+                            state.active_profile = None;
+                            state.set_status("Monitors refreshed.", StatusLevel::Success);
                         }
-                    }
+                        Err(e) => {
+                            state.set_status(format!("Refresh failed: {}", e), StatusLevel::Error);
+                        }
+                    },
                     _ => {
                         if !ui::handle_key(key, &mut state) {
                             break;
@@ -193,7 +197,18 @@ async fn run(
             match monitor::apply_monitors(&state.monitors).await {
                 Ok(()) => {
                     bread_events::emit_applied(state.active_profile.as_deref());
-                    state.set_status("Applied.", StatusLevel::Success);
+                    match store::save_from_monitors(&state.monitors) {
+                        Ok(()) => {
+                            state.dirty = false;
+                            state.set_status("Applied.", StatusLevel::Success);
+                        }
+                        Err(e) => {
+                            state.set_status(
+                                format!("Applied, but monitors.json write failed: {}", e),
+                                StatusLevel::Error,
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     state.set_status(format!("Apply failed: {}", e), StatusLevel::Error);

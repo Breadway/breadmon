@@ -19,7 +19,7 @@ toml       = "0.8"
 anyhow     = "1"
 dirs       = "5"
 futures    = "0.3"
-bread-utils = { git = "https://git.breadway.dev/Breadway/bread-ecosystem", tag = "v0.7.1", features = ["bread-client"] }
+bread-utils = { git = "https://git.breadway.dev/Breadway/bread-ecosystem", tag = "v0.7.2", features = ["bread-client"] }
 
 [profile.release]
 lto = "thin"

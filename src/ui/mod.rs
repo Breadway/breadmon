@@ -14,10 +14,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{
-    layout::LayoutState,
-    monitor::Monitor,
-};
+use crate::{layout::LayoutState, monitor::Monitor};
 
 use config_view::ConfigState;
 use mirror_view::MirrorState;
@@ -141,7 +138,11 @@ impl AppState {
     }
 
     pub fn set_status(&mut self, text: impl Into<String>, level: StatusLevel) {
-        self.status = Some(StatusMsg { text: text.into(), level, born: Instant::now() });
+        self.status = Some(StatusMsg {
+            text: text.into(),
+            level,
+            born: Instant::now(),
+        });
     }
 
     /// Mark the in-memory layout as edited. Also forgets `active_profile`
@@ -163,7 +164,8 @@ impl AppState {
     pub fn switch_tab(&mut self, tab: Tab) {
         self.tab = tab;
         if tab == Tab::Config {
-            self.config.sync_from_monitor(self.layout.selected, &self.monitors);
+            self.config
+                .sync_from_monitor(self.layout.selected, &self.monitors);
         }
     }
 
@@ -214,10 +216,22 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) -> bool {
 
     // Global tab switching
     match event.code {
-        KeyCode::Char('1') | KeyCode::F(1) => { state.switch_tab(Tab::Layout); return true; }
-        KeyCode::Char('2') | KeyCode::F(2) => { state.switch_tab(Tab::Config); return true; }
-        KeyCode::Char('3') | KeyCode::F(3) => { state.switch_tab(Tab::Mirror); return true; }
-        KeyCode::Char('4') | KeyCode::F(4) => { state.switch_tab(Tab::Profiles); return true; }
+        KeyCode::Char('1') | KeyCode::F(1) => {
+            state.switch_tab(Tab::Layout);
+            return true;
+        }
+        KeyCode::Char('2') | KeyCode::F(2) => {
+            state.switch_tab(Tab::Config);
+            return true;
+        }
+        KeyCode::Char('3') | KeyCode::F(3) => {
+            state.switch_tab(Tab::Mirror);
+            return true;
+        }
+        KeyCode::Char('4') | KeyCode::F(4) => {
+            state.switch_tab(Tab::Profiles);
+            return true;
+        }
         _ => {}
     }
 

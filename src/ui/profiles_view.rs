@@ -126,7 +126,10 @@ fn handle_list_key(event: KeyEvent, state: &mut AppState) {
                     match profile::delete(&name) {
                         Ok(()) => {
                             state.profiles.refresh();
-                            state.set_status(format!("Deleted profile '{}'", name), StatusLevel::Success);
+                            state.set_status(
+                                format!("Deleted profile '{}'", name),
+                                StatusLevel::Success,
+                            );
                         }
                         Err(e) => {
                             state.set_status(format!("Delete failed: {}", e), StatusLevel::Error);
@@ -195,8 +198,11 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
         MouseEventKind::ScrollUp => {
             let count = state.profiles.profiles.len();
             if count > 0 {
-                state.profiles.selected_idx =
-                    state.profiles.selected_idx.checked_sub(1).unwrap_or(count - 1);
+                state.profiles.selected_idx = state
+                    .profiles
+                    .selected_idx
+                    .checked_sub(1)
+                    .unwrap_or(count - 1);
                 state.profiles.focused = ProfileField::List;
             }
         }
@@ -308,7 +314,9 @@ fn render_list(f: &mut Frame, area: Rect, state: &AppState) {
                         .add_modifier(Modifier::BOLD)
                         .bg(Color::DarkGray)
                 } else if is_selected {
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -362,22 +370,28 @@ fn render_save_row(f: &mut Frame, area: Rect, state: &AppState) {
         Style::default().fg(Color::DarkGray)
     };
     f.render_widget(
-        Paragraph::new(input_display)
-            .style(input_style)
-            .block(Block::default().borders(Borders::ALL).border_style(input_style)),
+        Paragraph::new(input_display).style(input_style).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(input_style),
+        ),
         chunks[0],
     );
 
     // Save button
     let save_style = if save_focused {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
     f.render_widget(
-        Paragraph::new(" [ Save ] ")
-            .style(save_style)
-            .block(Block::default().borders(Borders::ALL).border_style(save_style)),
+        Paragraph::new(" [ Save ] ").style(save_style).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(save_style),
+        ),
         chunks[1],
     );
 }

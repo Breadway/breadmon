@@ -125,7 +125,10 @@ impl ConfigState {
     }
 
     fn prev_field(&mut self) {
-        self.focused = self.focused.checked_sub(1).unwrap_or(ConfigField::ALL.len() - 1);
+        self.focused = self
+            .focused
+            .checked_sub(1)
+            .unwrap_or(ConfigField::ALL.len() - 1);
     }
 }
 
@@ -314,14 +317,22 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
             _ => {}
         },
         ConfigField::Vrr => match event.code {
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
+            KeyCode::Char('h')
+            | KeyCode::Left
+            | KeyCode::Char('l')
+            | KeyCode::Right
+            | KeyCode::Char(' ') => {
                 state.monitors[idx].vrr = !state.monitors[idx].vrr;
                 state.mark_dirty();
             }
             _ => {}
         },
         ConfigField::Dpms => match event.code {
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
+            KeyCode::Char('h')
+            | KeyCode::Left
+            | KeyCode::Char('l')
+            | KeyCode::Right
+            | KeyCode::Char(' ') => {
                 state.monitors[idx].dpms = !state.monitors[idx].dpms;
                 state.mark_dirty();
             }
@@ -358,7 +369,11 @@ fn sync_mode_to_monitor(state: &mut AppState, idx: usize) {
 }
 
 fn sync_mirror_to_monitor(state: &mut AppState, idx: usize) {
-    let chosen = state.config.mirror_options.get(state.config.mirror_idx).cloned();
+    let chosen = state
+        .config
+        .mirror_options
+        .get(state.config.mirror_idx)
+        .cloned();
     state.monitors[idx].mirror_of = match chosen.as_deref() {
         Some("(none)") | None => None,
         Some(s) => Some(s.to_owned()),
@@ -366,7 +381,10 @@ fn sync_mirror_to_monitor(state: &mut AppState, idx: usize) {
 }
 
 fn commit_scale(state: &mut AppState) {
-    let idx = state.config.monitor_idx.min(state.monitors.len().saturating_sub(1));
+    let idx = state
+        .config
+        .monitor_idx
+        .min(state.monitors.len().saturating_sub(1));
     if let Ok(v) = state.config.scale_str.parse::<f64>() {
         state.monitors[idx].scale = v.clamp(0.1, 10.0);
         state.config.scale_str = format!("{:.2}", state.monitors[idx].scale);
@@ -405,7 +423,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
     let header = format!(" {} — {}{}", m.name, m.description, ppi_hint);
     f.render_widget(
-        Paragraph::new(header).style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Paragraph::new(header).style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
         chunks[0],
     );
 
@@ -463,20 +485,31 @@ fn field_value(field: ConfigField, state: &AppState, m: &Monitor) -> String {
         }
         ConfigField::Scale => {
             if state.config.scale_editing {
-                format!("{}|  (Enter to commit, ,/. for ±0.1)", state.config.scale_str)
+                format!(
+                    "{}|  (Enter to commit, ,/. for ±0.1)",
+                    state.config.scale_str
+                )
             } else {
                 format!("{}  (,/. for ±0.1)", state.config.scale_str)
             }
         }
         ConfigField::Transform => Transform::all()
             [state.config.transform_idx.min(Transform::all().len() - 1)]
-            .label()
-            .to_owned(),
+        .label()
+        .to_owned(),
         ConfigField::Vrr => {
-            if m.vrr { "ON".to_owned() } else { "OFF".to_owned() }
+            if m.vrr {
+                "ON".to_owned()
+            } else {
+                "OFF".to_owned()
+            }
         }
         ConfigField::Dpms => {
-            if m.dpms { "ON".to_owned() } else { "OFF".to_owned() }
+            if m.dpms {
+                "ON".to_owned()
+            } else {
+                "OFF".to_owned()
+            }
         }
         ConfigField::MirrorOf => state
             .config

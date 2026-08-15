@@ -2,7 +2,7 @@
 
 A terminal UI monitor manager for Hyprland. Lets you position, configure, and mirror displays interactively, then apply a live layout on [BOS](https://git.breadway.dev/breadway/bos)-patched Hyprland.
 
-breadmon is **not** the Display panel in `bos-settings`. That panel edits `~/.config/hypr/monitors.json` (Hyprland's login/reload layout store). breadmon keeps its own named snapshots as TOML under `~/.config/breadmon/profiles/` and applies them live through BOS Hyprland. The two stores are independent — changing one does not update the other.
+The Display panel in `bos-settings` (GUI) and breadmon (TUI) share `~/.config/hypr/monitors.json` — the layout Hyprland reads at login/reload. Applying in breadmon writes that file so the settings app and the next session stay in sync. Named profiles remain optional snapshots under `~/.config/breadmon/profiles/`.
 
 ## Requirements
 
@@ -80,7 +80,7 @@ Finds the best common mode between two monitors and sets one to mirror the other
 
 ### Profiles
 
-Named snapshots of the current monitor configuration, stored as TOML files.
+Named snapshots of the current monitor configuration, stored as TOML files. Loading a profile updates the TUI; applying it (`a`) also writes `monitors.json`.
 
 | Key | Action |
 |-----|--------|
@@ -95,8 +95,8 @@ Profiles are saved to `~/.config/breadmon/profiles/`.
 
 | Key | Action |
 |-----|--------|
-| `a` | Apply current configuration via `hyprctl eval 'hl.monitor({...})'` (BOS-patched Hyprland only) |
-| `s` | Save current configuration as a profile |
+| `a` | Apply current configuration via `hyprctl eval 'hl.monitor({...})'` (BOS-patched Hyprland only) and write `~/.config/hypr/monitors.json` |
+| `s` | Write `~/.config/hypr/monitors.json` without a live apply |
 | `r` | Refresh monitor list from Hyprland |
 | `Ctrl+Z` | Undo last change (up to 20 steps) |
 | `q` / `Ctrl+C` | Quit (prompts once if there are unsaved changes) |
@@ -105,9 +105,19 @@ breadmon also listens on Hyprland's event socket and reloads the monitor list au
 
 ## Config
 
-Profiles are plain TOML files under `~/.config/breadmon/profiles/`. Each file records the monitor name, mode, position, scale, transform, VRR, DPMS, and mirror source. They are created and managed through the Profiles tab; there is no hand-written config file.
+**Shared store:** `~/.config/hypr/monitors.json` — the same file the bos-settings Display panel edits and Hyprland applies on login/reload. breadmon is the TUI; Display is the GUI. Schema:
 
-This is not `~/.config/hypr/monitors.json`. That file is the persistent Hyprland layout edited by the `bos-settings` Display panel and applied on login/reload. breadmon never reads or writes it.
+```json
+{
+  "monitors": [
+    { "output": "", "mode": "preferred", "position": "auto", "scale": "auto", "mirror": "<optional string>" }
+  ]
+}
+```
+
+Empty `output` is the wildcard default (any connector). breadmon loads this file on start (overlaid onto the live `hyprctl` list) and writes it — pretty JSON — after a successful apply, and when you press `s`.
+
+**Named snapshots:** plain TOML under `~/.config/breadmon/profiles/`. Each file records the monitor name, mode, position, scale, transform, VRR, DPMS, and mirror source. They are created and managed through the Profiles tab. Applying a profile writes `monitors.json` so Hyprland and Display stay in sync.
 
 ## bread event integration
 

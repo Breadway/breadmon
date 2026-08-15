@@ -196,7 +196,11 @@ mod tests {
         Monitor {
             name: name.into(),
             description: String::new(),
-            active_mode: Mode { width: w, height: h, refresh: 60.0 },
+            active_mode: Mode {
+                width: w,
+                height: h,
+                refresh: 60.0,
+            },
             x,
             y,
             scale: 1.0,

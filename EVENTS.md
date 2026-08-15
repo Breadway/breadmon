@@ -14,9 +14,10 @@ connection (`BreadClient::emit` never blocks or errors the caller).
 
 This event is about breadmon's own live apply (`hyprctl eval
 'hl.monitor({...})'` on [BOS](https://git.breadway.dev/breadway/bos)-patched
-Hyprland). It is **not** fired by the `bos-settings` Display panel, which
-writes `~/.config/hypr/monitors.json` and is a separate store breadmon
-never reads or writes. Vanilla/upstream Hyprland has no `eval` request
+Hyprland). After that apply succeeds, breadmon also writes
+`~/.config/hypr/monitors.json` (the store shared with the `bos-settings`
+Display panel). The event is **not** fired by Display itself — that GUI
+only edits the JSON. Vanilla/upstream Hyprland has no `eval` request
 and no `hl.monitor()`, so apply fails there and this event is not
 published.
 

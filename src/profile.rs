@@ -77,8 +77,7 @@ pub fn list() -> Result<Vec<String>> {
 
 pub fn delete(name: &str) -> Result<()> {
     let path = profiles_dir().join(format!("{}.toml", name));
-    std::fs::remove_file(&path)
-        .with_context(|| format!("failed to delete profile '{}'", name))
+    std::fs::remove_file(&path).with_context(|| format!("failed to delete profile '{}'", name))
 }
 
 pub fn from_monitors(name: &str, monitors: &[Monitor]) -> Profile {
@@ -150,7 +149,11 @@ mod tests {
         Monitor {
             name: name.into(),
             description: String::new(),
-            active_mode: Mode { width: w, height: h, refresh: 60.0 },
+            active_mode: Mode {
+                width: w,
+                height: h,
+                refresh: 60.0,
+            },
             x,
             y,
             scale: 1.0,

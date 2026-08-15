@@ -145,11 +145,15 @@ impl Monitor {
             .collect();
         // Sort descending by pixels then refresh for consistent ordering
         modes.sort_by(|a, b| {
-            b.pixels()
-                .cmp(&a.pixels())
-                .then(b.refresh.partial_cmp(&a.refresh).unwrap_or(std::cmp::Ordering::Equal))
+            b.pixels().cmp(&a.pixels()).then(
+                b.refresh
+                    .partial_cmp(&a.refresh)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
         });
-        modes.dedup_by(|a, b| a.width == b.width && a.height == b.height && (a.refresh - b.refresh).abs() < 0.01);
+        modes.dedup_by(|a, b| {
+            a.width == b.width && a.height == b.height && (a.refresh - b.refresh).abs() < 0.01
+        });
 
         let active_mode = Mode {
             width: raw.width,
@@ -214,8 +218,10 @@ impl Monitor {
         if self.physical_width_mm == 0 || self.physical_height_mm == 0 {
             return None;
         }
-        let diag_px = ((self.active_mode.width.pow(2) + self.active_mode.height.pow(2)) as f64).sqrt();
-        let diag_mm = ((self.physical_width_mm.pow(2) + self.physical_height_mm.pow(2)) as f64).sqrt();
+        let diag_px =
+            ((self.active_mode.width.pow(2) + self.active_mode.height.pow(2)) as f64).sqrt();
+        let diag_mm =
+            ((self.physical_width_mm.pow(2) + self.physical_height_mm.pow(2)) as f64).sqrt();
         Some(diag_px / (diag_mm / 25.4))
     }
 
@@ -268,8 +274,10 @@ pub async fn load_monitors() -> Result<Vec<Monitor>> {
 
     // Hyprland reports mirrorOf as a numeric ID string when using `monitors all`.
     // Resolve to monitor name so format_hypr_line emits the correct `mirror,<name>`.
-    let id_to_name: std::collections::HashMap<String, String> =
-        raw.iter().map(|r| (r.id.to_string(), r.name.clone())).collect();
+    let id_to_name: std::collections::HashMap<String, String> = raw
+        .iter()
+        .map(|r| (r.id.to_string(), r.name.clone()))
+        .collect();
 
     Ok(raw
         .into_iter()
@@ -284,6 +292,7 @@ pub async fn load_monitors() -> Result<Vec<Monitor>> {
         .collect())
 }
 
+#[cfg(test)]
 pub fn format_hypr_line(m: &Monitor) -> String {
     if let Some(src) = &m.mirror_of {
         format!(
@@ -444,7 +453,11 @@ mod tests {
 
     #[test]
     fn mode_compact_roundtrip() {
-        let m = Mode { width: 1920, height: 1080, refresh: 60.0 };
+        let m = Mode {
+            width: 1920,
+            height: 1080,
+            refresh: 60.0,
+        };
         let s = m.compact();
         let m2 = Mode::parse(&format!("{}Hz", s)).unwrap();
         assert_eq!(m.width, m2.width);
@@ -456,7 +469,11 @@ mod tests {
         let m = Monitor {
             name: "eDP-1".into(),
             description: String::new(),
-            active_mode: Mode { width: 1920, height: 1200, refresh: 60.0 },
+            active_mode: Mode {
+                width: 1920,
+                height: 1200,
+                refresh: 60.0,
+            },
             x: 0,
             y: 0,
             scale: 1.0,
@@ -480,7 +497,11 @@ mod tests {
         let m = Monitor {
             name: "HDMI-A-1".into(),
             description: String::new(),
-            active_mode: Mode { width: 1920, height: 1080, refresh: 60.0 },
+            active_mode: Mode {
+                width: 1920,
+                height: 1080,
+                refresh: 60.0,
+            },
             x: 1920,
             y: 0,
             scale: 1.0,

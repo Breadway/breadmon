@@ -8,7 +8,10 @@ use ratatui::{
 };
 
 use crate::{
-    layout::{auto_arrange, bounding_box, canvas_scale, canvas_to_world, move_selected, snap_position, world_to_canvas},
+    layout::{
+        auto_arrange, bounding_box, canvas_scale, canvas_to_world, move_selected, snap_position,
+        world_to_canvas,
+    },
     monitor::Monitor,
     ui::{AppState, DragState, StatusLevel, Tab},
 };
@@ -49,7 +52,9 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) {
             state.mark_dirty();
         }
         KeyCode::Enter => {
-            state.config.sync_from_monitor(state.layout.selected, &state.monitors);
+            state
+                .config
+                .sync_from_monitor(state.layout.selected, &state.monitors);
             state.tab = Tab::Config;
         }
         _ => {}
@@ -66,7 +71,8 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
             if let Some(idx) = monitor_at(col, row, canvas, state) {
                 let (min_x, min_y, _, _) = bounding_box(&state.monitors);
                 let scale = canvas_scale_for(canvas, state);
-                let (wx, wy) = canvas_to_world(col, row, scale, min_x, min_y, canvas.x + 1, canvas.y + 1);
+                let (wx, wy) =
+                    canvas_to_world(col, row, scale, min_x, min_y, canvas.x + 1, canvas.y + 1);
 
                 // Push undo at drag start, not on every move
                 state.push_undo();
@@ -85,12 +91,19 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
                 let canvas = canvas_area(state.terminal_size);
                 let (min_x, min_y, _, _) = bounding_box(&state.monitors);
                 let scale = canvas_scale_for(canvas, state);
-                let (wx, wy) = canvas_to_world(col, row, scale, min_x, min_y, canvas.x + 1, canvas.y + 1);
+                let (wx, wy) =
+                    canvas_to_world(col, row, scale, min_x, min_y, canvas.x + 1, canvas.y + 1);
 
                 let idx = drag.monitor_idx;
                 let new_x = drag.origin_x + (wx - drag.click_world_x);
                 let new_y = drag.origin_y + (wy - drag.click_world_y);
-                let (sx, sy) = snap_position(idx, new_x, new_y, &state.monitors, state.layout.snap_threshold);
+                let (sx, sy) = snap_position(
+                    idx,
+                    new_x,
+                    new_y,
+                    &state.monitors,
+                    state.layout.snap_threshold,
+                );
                 state.monitors[idx].x = sx;
                 state.monitors[idx].y = sy;
                 state.mark_dirty();
@@ -162,18 +175,31 @@ fn render_canvas(f: &mut Frame, area: Rect, state: &AppState) {
             continue;
         }
 
-        let rect = Rect { x: cx, y: cy, width: cw, height: ch };
+        let rect = Rect {
+            x: cx,
+            y: cy,
+            width: cw,
+            height: ch,
+        };
 
         let is_selected = i == selected;
-        let is_dragging = state.drag_state.as_ref().map(|d| d.monitor_idx == i).unwrap_or(false);
+        let is_dragging = state
+            .drag_state
+            .as_ref()
+            .map(|d| d.monitor_idx == i)
+            .unwrap_or(false);
         let is_overlapping = overlapping[i];
 
         let border_style = if is_dragging {
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD)
         } else if is_overlapping {
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
         } else if is_selected {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Blue)
         };
@@ -190,7 +216,10 @@ fn render_canvas(f: &mut Frame, area: Rect, state: &AppState) {
             })
             .border_style(border_style)
             .title(Span::styled(&label, border_style))
-            .title_bottom(Span::styled(&mode_str, Style::default().fg(Color::DarkGray)));
+            .title_bottom(Span::styled(
+                &mode_str,
+                Style::default().fg(Color::DarkGray),
+            ));
 
         f.render_widget(block, rect);
     }
@@ -203,7 +232,9 @@ fn render_readout(f: &mut Frame, area: Rect, state: &AppState) {
     let idx = state.layout.selected.min(state.monitors.len() - 1);
     let m = &state.monitors[idx];
 
-    let mirror_info = m.mirror_of.as_ref()
+    let mirror_info = m
+        .mirror_of
+        .as_ref()
         .map(|src| format!("  mirror:{}", src))
         .unwrap_or_default();
 
@@ -213,14 +244,24 @@ fn render_readout(f: &mut Frame, area: Rect, state: &AppState) {
         ""
     };
 
-    let drag_hint = if state.drag_state.is_some() { "  [dragging]" } else { "" };
+    let drag_hint = if state.drag_state.is_some() {
+        "  [dragging]"
+    } else {
+        ""
+    };
 
     let text = format!(
         " {}  x:{}  y:{}  {}x{}@{:.0}Hz  scale:{:.2}{}{}{}",
-        m.name, m.x, m.y,
-        m.active_mode.width, m.active_mode.height, m.active_mode.refresh,
+        m.name,
+        m.x,
+        m.y,
+        m.active_mode.width,
+        m.active_mode.height,
+        m.active_mode.refresh,
         m.scale,
-        mirror_info, overlap_warn, drag_hint,
+        mirror_info,
+        overlap_warn,
+        drag_hint,
     );
     f.render_widget(
         Paragraph::new(text).style(Style::default().fg(Color::Cyan)),
@@ -235,8 +276,10 @@ fn overlapping_monitors(monitors: &[Monitor]) -> Vec<bool> {
         for j in (i + 1)..monitors.len() {
             let a = &monitors[i];
             let b = &monitors[j];
-            if a.x < b.right_edge() && a.right_edge() > b.x
-                && a.y < b.bottom_edge() && a.bottom_edge() > b.y
+            if a.x < b.right_edge()
+                && a.right_edge() > b.x
+                && a.y < b.bottom_edge()
+                && a.bottom_edge() > b.y
             {
                 flags[i] = true;
                 flags[j] = true;
@@ -301,31 +344,13 @@ fn monitor_at(col: u16, row: u16, canvas: Rect, state: &AppState) -> Option<usiz
 }
 
 pub fn trigger_save(state: &mut AppState) {
-    use crate::monitor::format_hypr_line;
-    use std::path::PathBuf;
-
-    let path: PathBuf = dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()))
-        .join("hypr/monitors.conf");
-
-    let is_new = !path.exists();
-    let mut lines = vec!["# Generated by breadmon — do not edit by hand".to_owned()];
-    for m in &state.monitors {
-        lines.push(format_hypr_line(m));
-    }
-    let content = lines.join("\n") + "\n";
-
-    match std::fs::write(&path, &content) {
+    match crate::store::save_from_monitors(&state.monitors) {
         Ok(()) => {
-            if is_new {
-                state.set_status(
-                    format!("Saved. Add: source = {} to hyprland.conf", path.display()),
-                    StatusLevel::Success,
-                );
-            } else {
-                state.set_status(format!("Saved to {}", path.display()), StatusLevel::Success);
-            }
             state.dirty = false;
+            state.set_status(
+                format!("Saved to {}", crate::store::config_path().display()),
+                StatusLevel::Success,
+            );
         }
         Err(e) => state.set_status(format!("Save failed: {}", e), StatusLevel::Error),
     }

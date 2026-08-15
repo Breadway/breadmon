@@ -12,7 +12,11 @@ pub struct MirrorResult {
 }
 
 fn gcd(a: u32, b: u32) -> u32 {
-    if b == 0 { a } else { gcd(b, a % b) }
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
 }
 
 fn reduced_ar(w: u32, h: u32) -> (u32, u32) {
@@ -35,7 +39,10 @@ pub fn find_mirror_modes(source: &Monitor, target: &Monitor) -> Option<MirrorRes
     // Group source modes by reduced AR
     let mut src_by_ar: HashMap<(u32, u32), Vec<&Mode>> = HashMap::new();
     for m in src_modes {
-        src_by_ar.entry(reduced_ar(m.width, m.height)).or_default().push(m);
+        src_by_ar
+            .entry(reduced_ar(m.width, m.height))
+            .or_default()
+            .push(m);
     }
 
     #[derive(Debug)]
@@ -53,8 +60,15 @@ pub fn find_mirror_modes(source: &Monitor, target: &Monitor) -> Option<MirrorRes
 
         if src_by_ar.contains_key(&tgt_ar) {
             // Check if we already have this exact pair
-            if !candidates.iter().any(|c| c.src_ar == tgt_ar && c.tgt_ar == tgt_ar && c.is_exact) {
-                candidates.push(Candidate { src_ar: tgt_ar, tgt_ar, is_exact: true });
+            if !candidates
+                .iter()
+                .any(|c| c.src_ar == tgt_ar && c.tgt_ar == tgt_ar && c.is_exact)
+            {
+                candidates.push(Candidate {
+                    src_ar: tgt_ar,
+                    tgt_ar,
+                    is_exact: true,
+                });
             }
             continue;
         }
@@ -63,9 +77,16 @@ pub fn find_mirror_modes(source: &Monitor, target: &Monitor) -> Option<MirrorRes
         for &s_ar in src_by_ar.keys() {
             let s_ratio = ratio_f64(s_ar);
             if (s_ratio - tgt_ratio).abs() / s_ratio < 0.05
-                && !candidates.iter().any(|c| c.src_ar == s_ar && c.tgt_ar == tgt_ar) {
-                    candidates.push(Candidate { src_ar: s_ar, tgt_ar, is_exact: false });
-                }
+                && !candidates
+                    .iter()
+                    .any(|c| c.src_ar == s_ar && c.tgt_ar == tgt_ar)
+            {
+                candidates.push(Candidate {
+                    src_ar: s_ar,
+                    tgt_ar,
+                    is_exact: false,
+                });
+            }
         }
     }
 
@@ -147,7 +168,10 @@ pub fn find_mirror_modes(source: &Monitor, target: &Monitor) -> Option<MirrorRes
         .collect();
 
     let chosen_refresh = if !exact_common.is_empty() {
-        exact_common.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+        exact_common
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max)
     } else {
         // Near-match within 1 Hz
         let near: Vec<f64> = src_refreshes
@@ -164,7 +188,10 @@ pub fn find_mirror_modes(source: &Monitor, target: &Monitor) -> Option<MirrorRes
             near.iter().copied().fold(f64::NEG_INFINITY, f64::max)
         } else {
             // Fallback: max source refresh
-            src_refreshes.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+            src_refreshes
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max)
         }
     };
 
@@ -217,7 +244,7 @@ pub fn refresh_match_label(result: &MirrorResult) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::monitor::{Transform};
+    use crate::monitor::Transform;
 
     fn make_monitor_with_modes(name: &str, modes: Vec<Mode>) -> Monitor {
         let active = modes[0].clone();
@@ -240,7 +267,11 @@ mod tests {
     }
 
     fn m(w: u32, h: u32, r: f64) -> Mode {
-        Mode { width: w, height: h, refresh: r }
+        Mode {
+            width: w,
+            height: h,
+            refresh: r,
+        }
     }
 
     #[test]

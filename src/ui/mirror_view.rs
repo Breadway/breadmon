@@ -45,7 +45,9 @@ impl MirrorState {
     fn next_field(&mut self) {
         // Skip Apply/Cancel if no result yet
         let mut next = (self.focused + 1) % FIELDS.len();
-        if self.result.is_none() && (FIELDS[next] == MirrorField::Apply || FIELDS[next] == MirrorField::Cancel) {
+        if self.result.is_none()
+            && (FIELDS[next] == MirrorField::Apply || FIELDS[next] == MirrorField::Cancel)
+        {
             next = 0;
         }
         self.focused = next;
@@ -54,8 +56,13 @@ impl MirrorState {
     fn prev_field(&mut self) {
         let len = FIELDS.len();
         let mut prev = self.focused.checked_sub(1).unwrap_or(len - 1);
-        if self.result.is_none() && (FIELDS[prev] == MirrorField::Apply || FIELDS[prev] == MirrorField::Cancel) {
-            prev = FIELDS.iter().position(|&f| f == MirrorField::Compute).unwrap_or(2);
+        if self.result.is_none()
+            && (FIELDS[prev] == MirrorField::Apply || FIELDS[prev] == MirrorField::Cancel)
+        {
+            prev = FIELDS
+                .iter()
+                .position(|&f| f == MirrorField::Compute)
+                .unwrap_or(2);
         }
         self.focused = prev;
     }
@@ -86,12 +93,14 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) {
         }
         KeyCode::Char('h') | KeyCode::Left => match state.mirror.current_field() {
             MirrorField::Source => {
-                state.mirror.source_idx = state.mirror.source_idx.checked_sub(1).unwrap_or(count - 1);
+                state.mirror.source_idx =
+                    state.mirror.source_idx.checked_sub(1).unwrap_or(count - 1);
                 state.mirror.fix_indices(count);
                 state.mirror.result = None;
             }
             MirrorField::Target => {
-                state.mirror.target_idx = state.mirror.target_idx.checked_sub(1).unwrap_or(count - 1);
+                state.mirror.target_idx =
+                    state.mirror.target_idx.checked_sub(1).unwrap_or(count - 1);
                 state.mirror.fix_indices(count);
                 state.mirror.result = None;
             }
@@ -118,7 +127,10 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) {
                     Some(result) => {
                         state.mirror.result = Some(result);
                         // Move focus to Apply
-                        state.mirror.focused = FIELDS.iter().position(|&f| f == MirrorField::Apply).unwrap_or(3);
+                        state.mirror.focused = FIELDS
+                            .iter()
+                            .position(|&f| f == MirrorField::Apply)
+                            .unwrap_or(3);
                     }
                     None => {
                         state.set_status(
@@ -143,9 +155,7 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) {
                     state.set_status(
                         format!(
                             "Mirror set: {} → {} at {}",
-                            src_name,
-                            state.monitors[tgt_idx].name,
-                            result.mirror_mode
+                            src_name, state.monitors[tgt_idx].name, result.mirror_mode
                         ),
                         StatusLevel::Success,
                     );
@@ -182,17 +192,26 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
             match row {
                 2 | 3 => {
                     // Source picker area
-                    let f_idx = FIELDS.iter().position(|&f| f == MirrorField::Source).unwrap_or(0);
+                    let f_idx = FIELDS
+                        .iter()
+                        .position(|&f| f == MirrorField::Source)
+                        .unwrap_or(0);
                     state.mirror.focused = f_idx;
                 }
                 4 | 5 => {
                     // Target picker area
-                    let f_idx = FIELDS.iter().position(|&f| f == MirrorField::Target).unwrap_or(1);
+                    let f_idx = FIELDS
+                        .iter()
+                        .position(|&f| f == MirrorField::Target)
+                        .unwrap_or(1);
                     state.mirror.focused = f_idx;
                 }
                 6 => {
                     // Compute button
-                    let f_idx = FIELDS.iter().position(|&f| f == MirrorField::Compute).unwrap_or(2);
+                    let f_idx = FIELDS
+                        .iter()
+                        .position(|&f| f == MirrorField::Compute)
+                        .unwrap_or(2);
                     state.mirror.focused = f_idx;
                     // Also activate it
                     let src = &state.monitors[state.mirror.source_idx];
@@ -200,7 +219,10 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
                     match crate::mirror::find_mirror_modes(src, tgt) {
                         Some(result) => {
                             state.mirror.result = Some(result);
-                            state.mirror.focused = FIELDS.iter().position(|&f| f == MirrorField::Apply).unwrap_or(3);
+                            state.mirror.focused = FIELDS
+                                .iter()
+                                .position(|&f| f == MirrorField::Apply)
+                                .unwrap_or(3);
                         }
                         None => {
                             state.set_status(
@@ -218,7 +240,10 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
                     let col = event.column;
                     if col < 20 {
                         // Activate Apply
-                        state.mirror.focused = FIELDS.iter().position(|&f| f == MirrorField::Apply).unwrap_or(3);
+                        state.mirror.focused = FIELDS
+                            .iter()
+                            .position(|&f| f == MirrorField::Apply)
+                            .unwrap_or(3);
                         if let Some(result) = state.mirror.result.clone() {
                             state.push_undo();
                             let src_name = state.monitors[state.mirror.source_idx].name.clone();
@@ -229,7 +254,10 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
                             state.mirror.result = None;
                             state.mirror.focused = 0;
                             state.set_status(
-                                format!("Mirror set: {} → {} at {}", src_name, state.monitors[tgt_idx].name, result.mirror_mode),
+                                format!(
+                                    "Mirror set: {} → {} at {}",
+                                    src_name, state.monitors[tgt_idx].name, result.mirror_mode
+                                ),
                                 crate::ui::StatusLevel::Success,
                             );
                         }
@@ -246,33 +274,33 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
             // Scroll in source/target pickers to cycle monitors
             match state.mirror.current_field() {
                 MirrorField::Source => {
-                    state.mirror.source_idx = state.mirror.source_idx.checked_sub(1).unwrap_or(count - 1);
+                    state.mirror.source_idx =
+                        state.mirror.source_idx.checked_sub(1).unwrap_or(count - 1);
                     state.mirror.fix_indices(count);
                     state.mirror.result = None;
                 }
                 MirrorField::Target => {
-                    state.mirror.target_idx = state.mirror.target_idx.checked_sub(1).unwrap_or(count - 1);
+                    state.mirror.target_idx =
+                        state.mirror.target_idx.checked_sub(1).unwrap_or(count - 1);
                     state.mirror.fix_indices(count);
                     state.mirror.result = None;
                 }
                 _ => {}
             }
         }
-        MouseEventKind::ScrollDown => {
-            match state.mirror.current_field() {
-                MirrorField::Source => {
-                    state.mirror.source_idx = (state.mirror.source_idx + 1) % count;
-                    state.mirror.fix_indices(count);
-                    state.mirror.result = None;
-                }
-                MirrorField::Target => {
-                    state.mirror.target_idx = (state.mirror.target_idx + 1) % count;
-                    state.mirror.fix_indices(count);
-                    state.mirror.result = None;
-                }
-                _ => {}
+        MouseEventKind::ScrollDown => match state.mirror.current_field() {
+            MirrorField::Source => {
+                state.mirror.source_idx = (state.mirror.source_idx + 1) % count;
+                state.mirror.fix_indices(count);
+                state.mirror.result = None;
             }
-        }
+            MirrorField::Target => {
+                state.mirror.target_idx = (state.mirror.target_idx + 1) % count;
+                state.mirror.fix_indices(count);
+                state.mirror.result = None;
+            }
+            _ => {}
+        },
         _ => {}
     }
 }
@@ -324,12 +352,16 @@ fn render_pickers(f: &mut Frame, area: Rect, state: &AppState, count: usize) {
     let focused = state.mirror.current_field();
 
     let src_style = if focused == MirrorField::Source {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::White)
     };
     let tgt_style = if focused == MirrorField::Target {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::White)
     };
@@ -354,7 +386,9 @@ fn render_pickers(f: &mut Frame, area: Rect, state: &AppState, count: usize) {
 fn render_compute_btn(f: &mut Frame, area: Rect, state: &AppState) {
     let focused = state.mirror.current_field() == MirrorField::Compute;
     let style = if focused {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -376,12 +410,16 @@ fn render_result(f: &mut Frame, area: Rect, state: &AppState, result: &MirrorRes
 
     let focused = state.mirror.current_field();
     let apply_style = if focused == MirrorField::Apply {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::White)
     };
     let cancel_style = if focused == MirrorField::Cancel {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -397,7 +435,10 @@ fn render_result(f: &mut Frame, area: Rect, state: &AppState, result: &MirrorRes
             Style::default().fg(Color::White),
         )),
         Line::from(Span::styled(
-            format!("  Refresh:      {:.2} Hz  ({})", result.refresh, refresh_label),
+            format!(
+                "  Refresh:      {:.2} Hz  ({})",
+                result.refresh, refresh_label
+            ),
             Style::default().fg(Color::White),
         )),
         Line::raw(""),
