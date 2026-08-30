@@ -133,27 +133,30 @@ impl ConfigState {
 }
 
 pub fn handle_key(event: KeyEvent, state: &mut AppState) {
-    let cfg = &mut state.config;
-
     match event.code {
         KeyCode::Char('j') | KeyCode::Down => {
-            cfg.scale_editing = false;
-            cfg.next_field();
+            state.clear_burst();
+            state.config.scale_editing = false;
+            state.config.next_field();
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            cfg.scale_editing = false;
-            cfg.prev_field();
+            state.clear_burst();
+            state.config.scale_editing = false;
+            state.config.prev_field();
         }
         KeyCode::Tab => {
-            cfg.scale_editing = false;
-            cfg.next_field();
+            state.clear_burst();
+            state.config.scale_editing = false;
+            state.config.next_field();
         }
         KeyCode::BackTab => {
-            cfg.scale_editing = false;
-            cfg.prev_field();
+            state.clear_burst();
+            state.config.scale_editing = false;
+            state.config.prev_field();
         }
         // Navigate between monitors
         KeyCode::Char('[') => {
+            state.clear_burst();
             let count = state.monitors.len();
             if count > 0 {
                 let new_idx = state.config.monitor_idx.checked_sub(1).unwrap_or(count - 1);
@@ -162,6 +165,7 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) {
             }
         }
         KeyCode::Char(']') => {
+            state.clear_burst();
             let count = state.monitors.len();
             if count > 0 {
                 let new_idx = (state.config.monitor_idx + 1) % count;
@@ -176,19 +180,20 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) {
             crate::ui::layout_view::trigger_save(state);
         }
         KeyCode::Esc => {
+            state.clear_burst();
             state.config.scale_editing = false;
             // Re-sync from live monitor to discard pending edits
             let idx = state.config.monitor_idx;
             state.config.sync_from_monitor(idx, &state.monitors);
         }
         KeyCode::Enter => {
+            state.clear_burst();
             if state.config.current_field() == ConfigField::Scale {
                 commit_scale(state);
             }
             apply_current(state);
         }
         _ => {
-            state.push_undo();
             handle_field_key(event, state);
         }
     }
@@ -214,12 +219,10 @@ pub fn handle_mouse(event: MouseEvent, state: &mut AppState) {
             }
         }
         MouseEventKind::ScrollUp => {
-            state.push_undo();
             let fake_right = KeyEvent::new(KeyCode::Right, crossterm::event::KeyModifiers::NONE);
             handle_field_key(fake_right, state);
         }
         MouseEventKind::ScrollDown => {
-            state.push_undo();
             let fake_left = KeyEvent::new(KeyCode::Left, crossterm::event::KeyModifiers::NONE);
             handle_field_key(fake_left, state);
         }
@@ -233,6 +236,8 @@ fn handle_field_key(event: KeyEvent, state: &mut AppState) {
         return;
     }
     let idx = state.config.monitor_idx.min(monitors_len - 1);
+    // Coalesce consecutive value cycles (and scroll) into one undo step.
+    state.micro_edit();
 
     match state.config.current_field() {
         ConfigField::Resolution => match event.code {
@@ -394,9 +399,12 @@ fn commit_scale(state: &mut AppState) {
 }
 
 fn apply_current(state: &mut AppState) {
+    state.clear_burst();
     state.pending_apply = true;
     state.set_status("Applying...", StatusLevel::Info);
-    state.dirty = false;
+    // Don't clear `dirty` here: it must survive until the apply actually
+    // succeeds (main.rs clears it on a successful apply + save). Otherwise a
+    // failed `hyprctl` apply would silently drop the unsaved-changes guard.
 }
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -432,7 +440,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     );
 
     let form_area = chunks[1];
-    let row_height = 1u16;
     let fields = ConfigField::ALL;
 
     let items: Vec<ListItem> = fields
@@ -454,7 +461,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         })
         .collect();
 
-    let _ = row_height; // used implicitly via ListItem heights
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)

@@ -173,11 +173,19 @@ async fn run(
                     }
                     crossterm::event::KeyCode::Char('r') => match monitor::load_monitors().await {
                         Ok(monitors) => {
-                            state.monitors = monitors;
-                            state.layout.clamp_selected(state.monitors.len());
-                            state.dirty = false;
-                            state.active_profile = None;
-                            state.set_status("Monitors refreshed.", StatusLevel::Success);
+                            if state.dirty {
+                                // Don't clobber unsaved edits (or silently drop the
+                                // unsaved-changes quit guard) on a refresh.
+                                state.set_status(
+                                    "Refresh skipped: unsaved changes present.",
+                                    StatusLevel::Info,
+                                );
+                            } else {
+                                state.monitors = monitors;
+                                state.layout.clamp_selected(state.monitors.len());
+                                state.active_profile = None;
+                                state.set_status("Monitors refreshed.", StatusLevel::Success);
+                            }
                         }
                         Err(e) => {
                             state.set_status(format!("Refresh failed: {}", e), StatusLevel::Error);

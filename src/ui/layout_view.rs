@@ -23,35 +23,48 @@ pub fn handle_key(event: KeyEvent, state: &mut AppState) {
 
     match event.code {
         KeyCode::Char('h') | KeyCode::Left => {
-            state.push_undo();
+            state.micro_edit();
             move_selected(&state.layout, &mut state.monitors, -step, 0);
             state.mark_dirty();
         }
         KeyCode::Char('l') | KeyCode::Right => {
-            state.push_undo();
+            state.micro_edit();
             move_selected(&state.layout, &mut state.monitors, step, 0);
             state.mark_dirty();
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            state.push_undo();
+            state.micro_edit();
             move_selected(&state.layout, &mut state.monitors, 0, -step);
             state.mark_dirty();
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            state.push_undo();
+            state.micro_edit();
             move_selected(&state.layout, &mut state.monitors, 0, step);
             state.mark_dirty();
         }
-        KeyCode::Tab | KeyCode::Char('n') => state.layout.next(count),
-        KeyCode::BackTab | KeyCode::Char('p') => state.layout.prev(count),
-        KeyCode::Char('[') => state.layout.zoom = (state.layout.zoom - 0.1).max(0.1),
-        KeyCode::Char(']') => state.layout.zoom = (state.layout.zoom + 0.1).min(5.0),
+        KeyCode::Tab | KeyCode::Char('n') => {
+            state.clear_burst();
+            state.layout.next(count);
+        }
+        KeyCode::BackTab | KeyCode::Char('p') => {
+            state.clear_burst();
+            state.layout.prev(count);
+        }
+        KeyCode::Char('[') => {
+            state.clear_burst();
+            state.layout.zoom = (state.layout.zoom - 0.1).max(0.1);
+        }
+        KeyCode::Char(']') => {
+            state.clear_burst();
+            state.layout.zoom = (state.layout.zoom + 0.1).min(5.0);
+        }
         KeyCode::Char('0') => {
             state.push_undo();
             auto_arrange(&mut state.monitors);
             state.mark_dirty();
         }
         KeyCode::Enter => {
+            state.clear_burst();
             state
                 .config
                 .sync_from_monitor(state.layout.selected, &state.monitors);

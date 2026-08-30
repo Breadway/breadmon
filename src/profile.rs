@@ -129,15 +129,39 @@ pub fn apply_to_monitors(profile: &Profile, monitors: &mut [Monitor]) {
 }
 
 fn chrono_now() -> String {
-    // Simple ISO 8601 timestamp without pulling in chrono
-    // Uses date command; falls back to a placeholder if unavailable
-    std::process::Command::new("date")
-        .arg("+%Y-%m-%dT%H:%M:%SZ")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_owned())
-        .unwrap_or_else(|| "unknown".to_owned())
+    // In-process ISO 8601 (UTC) timestamp — no chrono crate, and no shelling
+    // out to `date`. `civil_from_days` is the Hinnant days-from-civil epoch
+    // algorithm. Falls back to the Unix epoch instant if the clock is broken.
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (h, m, s) = secs_of_day(secs % 86_400);
+    let (y, mo, d) = civil_from_days((secs / 86_400) as i64);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
+}
+
+/// Convert days since 1970-01-01 to a (year, month, day) civil date.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// Seconds within the day -> (hours, minutes, seconds).
+fn secs_of_day(secs: u64) -> (u32, u32, u32) {
+    (
+        ((secs / 3600) % 24) as u32,
+        ((secs / 60) % 60) as u32,
+        (secs % 60) as u32,
+    )
 }
 
 #[cfg(test)]
@@ -183,5 +207,20 @@ mod tests {
         assert_eq!(deserialized.monitors[0].name, "eDP-1");
         assert_eq!(deserialized.monitors[0].mode, "1920x1200@60.00");
         assert_eq!(deserialized.monitors[1].x, 1920);
+    }
+
+    #[test]
+    fn chrono_now_helpers() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        // 2024-01-01 is epoch day 19723.
+        assert_eq!(civil_from_days(19_723), (2024, 1, 1));
+        assert_eq!(secs_of_day(0), (0, 0, 0));
+        assert_eq!(secs_of_day(86_399), (23, 59, 59));
+        // Spot-check the formatted output shape.
+        let s = chrono_now();
+        assert_eq!(s.len(), 20);
+
+        assert!(s.ends_with('Z'));
+        assert!(s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-');
     }
 }

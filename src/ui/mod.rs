@@ -114,6 +114,9 @@ pub struct AppState {
     pub active_profile: Option<String>,
     /// Snapshots for Ctrl+Z undo (up to 20 deep).
     pub undo_stack: Vec<Vec<Monitor>>,
+    /// True while a run of small incremental edits (nudges / value cycles)
+    /// is ongoing, so undo coalesces the whole burst into one snapshot.
+    undo_in_burst: bool,
 }
 
 impl AppState {
@@ -134,6 +137,7 @@ impl AppState {
             pending_apply: false,
             active_profile: None,
             undo_stack: Vec::new(),
+            undo_in_burst: false,
         }
     }
 
@@ -162,6 +166,7 @@ impl AppState {
     }
 
     pub fn switch_tab(&mut self, tab: Tab) {
+        self.undo_in_burst = false;
         self.tab = tab;
         if tab == Tab::Config {
             self.config
@@ -169,8 +174,32 @@ impl AppState {
         }
     }
 
-    /// Save a monitor snapshot for undo (max 20 entries).
+    /// Save a monitor snapshot for undo (max 20 entries) and end any
+    /// in-progress edit burst.
     pub fn push_undo(&mut self) {
+        self.push_snapshot();
+        self.undo_in_burst = false;
+    }
+
+    /// Start (or continue) a run of small incremental edits. Only the first
+    /// edit in the run actually snapshots, so nudging a monitor 20 px (or
+    /// cycling a value repeatedly) collapses to a single undo step rather
+    /// than consuming 20 of the 20-step undo stack.
+    pub fn micro_edit(&mut self) {
+        if !self.undo_in_burst {
+            self.push_snapshot();
+            self.undo_in_burst = true;
+        }
+    }
+
+    /// End a coalesced-edit burst without snapping. Called on navigation
+    /// (tab switches, monitor/field changes, zoom) so bursts don't bleed
+    /// across distinct actions.
+    pub fn clear_burst(&mut self) {
+        self.undo_in_burst = false;
+    }
+
+    fn push_snapshot(&mut self) {
         self.undo_stack.push(self.monitors.clone());
         if self.undo_stack.len() > 20 {
             self.undo_stack.remove(0);
@@ -181,6 +210,7 @@ impl AppState {
     pub fn undo(&mut self) {
         if let Some(snapshot) = self.undo_stack.pop() {
             self.monitors = snapshot;
+            self.undo_in_burst = false;
             self.mark_dirty();
             self.layout.clamp_selected(self.monitors.len());
             // Re-sync config view to the restored state
