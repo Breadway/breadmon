@@ -35,3 +35,6 @@ CLAUDE.md
 
 # graphify knowledge-graph output (local tool cache, not for commit)
 graphify-out/
+
+# .freebuff local tool state (not for commit)
+.freebuff/
