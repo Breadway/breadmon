@@ -12,7 +12,7 @@ release. "Freezing" for stabilization means pausing pushes to `main`, not
 moving a branch.
 
 ## Remotes
-- `origin` — Forgejo (`git.breadway.dev` via Hestia, SSH) — authoritative.
+- `origin` — Forgejo (`git.breadway.dev`, SSH) — authoritative.
 - `github` — GitHub mirror. Push both when publishing.
 
 ## CI
@@ -21,7 +21,7 @@ moving a branch.
 - `rc-release.yml` — triggers on `vX.Y.Z-rc.N` tag push.
 - `release.yml` — triggers on any other `v*` tag push.
 
-All four run on a self-hosted runner (`hestia`) inside a pinned Arch
+All four run on a self-hosted runner inside a pinned Arch
 container — not the host's native environment. The Containerfile/build
 script are shared across bread-ecosystem products and live in
 `bread-ecosystem/ci/`; this repo's `ci/build.sh` clones that repo at the
