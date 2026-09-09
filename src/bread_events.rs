@@ -1,4 +1,4 @@
-//! `bread.mon.*` event integration — optional, non-blocking. See
+//! `bread.mon.*` event integration, optional, non-blocking. See
 //! `EVENTS.md` at the repo root for the full contract. breadmon works
 //! identically with or without breadd running; every call here is
 //! fire-and-forget (`BreadClient::emit` never blocks or errors this
@@ -8,7 +8,7 @@ use bread_utils::bread_client::BreadClient;
 use serde_json::{json, Value};
 
 /// This app's id in bread's sibling-app namespace registry
-/// (`bread_shared::apps::KNOWN_APPS`) — events publish as `bread.mon.*`.
+/// (`bread_shared::apps::KNOWN_APPS`); events publish as `bread.mon.*`.
 pub const APP_ID: &str = "mon";
 
 /// JSON payload for `bread.mon.applied`. `profile` is the named snapshot
@@ -18,7 +18,7 @@ pub fn applied_data(profile: Option<&str>) -> Value {
 }
 
 /// Publishes `bread.mon.applied` after a successful hyprctl apply.
-/// Fire-and-forget and non-fatal by design — breadd being absent or not
+/// Fire-and-forget and non-fatal by design: breadd being absent or not
 /// installed must never affect breadmon's own apply path.
 pub fn emit_applied(profile: Option<&str>) {
     BreadClient::connect(APP_ID).emit("bread.mon.applied", applied_data(profile));

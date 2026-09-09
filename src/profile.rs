@@ -30,8 +30,8 @@ pub struct Profile {
 }
 
 pub fn profiles_dir() -> PathBuf {
-    // Was `dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"))`
-    // — same literal-tilde-fallback bug found (and fixed) in breadclip-core
+    // Was `dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"))`:
+    // same literal-tilde-fallback bug found (and fixed) in breadclip-core
     // and breadpad-shared during tonight's ecosystem-utils pass: PathBuf/
     // std::fs never expand `~`, so on a box where `dirs` can't resolve a
     // home directory this would silently resolve to a directory literally
@@ -129,7 +129,7 @@ pub fn apply_to_monitors(profile: &Profile, monitors: &mut [Monitor]) {
 }
 
 fn chrono_now() -> String {
-    // In-process ISO 8601 (UTC) timestamp — no chrono crate, and no shelling
+    // In-process ISO 8601 (UTC) timestamp, no chrono crate, and no shelling
     // out to `date`. `civil_from_days` is the Hinnant days-from-civil epoch
     // algorithm. Falls back to the Unix epoch instant if the clock is broken.
     let secs = std::time::SystemTime::now()

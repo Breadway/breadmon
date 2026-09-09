@@ -62,7 +62,7 @@ impl Default for MonitorsFile {
     }
 }
 
-/// `~/.config/hypr/monitors.json` — same path Hyprland and bos-settings use.
+/// `~/.config/hypr/monitors.json`: same path Hyprland and bos-settings use.
 pub fn config_path() -> PathBuf {
     bread_utils::xdg::config_dir("hypr").join("monitors.json")
 }

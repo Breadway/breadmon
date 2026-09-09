@@ -380,7 +380,7 @@ pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
                 return Err(anyhow::anyhow!(
                     "breadmon: `hyprctl eval` (and the `hl.monitor()` Lua extension it uses \
                      to apply monitor changes) is not available on this compositor. \
-                     This feature requires BOS (Bread OS)'s patched Hyprland build — it \
+                     This feature requires BOS (Bread OS)'s patched Hyprland build; it \
                      does not exist on vanilla/upstream Hyprland. See the breadmon README \
                      for details. (raw hyprctl response: {stdout:?})"
                 ));

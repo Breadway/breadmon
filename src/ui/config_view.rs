@@ -429,7 +429,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         (Some(ppi), Some(scale)) => format!("  │  {:.0} PPI  (suggested scale: {:.2})", ppi, scale),
         _ => String::new(),
     };
-    let header = format!(" {} — {}{}", m.name, m.description, ppi_hint);
+    let header = format!(" {}: {}{}", m.name, m.description, ppi_hint);
     f.render_widget(
         Paragraph::new(header).style(
             Style::default()

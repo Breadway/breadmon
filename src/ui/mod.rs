@@ -149,8 +149,8 @@ impl AppState {
         });
     }
 
-    /// Mark the in-memory layout as edited. Also forgets `active_profile`
-    /// — a mutated layout is no longer the named snapshot that was loaded
+    /// Mark the in-memory layout as edited. Also forgets `active_profile`:
+    /// a mutated layout is no longer the named snapshot that was loaded
     /// or saved.
     pub fn mark_dirty(&mut self) {
         self.dirty = true;

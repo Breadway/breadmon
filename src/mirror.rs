@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn different_ar_approx_match() {
-        // 16:9 source vs 16:10 target — AR ratio ~11% difference, exceeds 5%
+        // 16:9 source vs 16:10 target: AR ratio ~11% difference, exceeds 5%
         // so this should fail to find a match (incompatible)
         // Actually 16:10 ratio is 1.6, 16:9 is 1.777, diff/1.777 = 10% > 5%
         let src = make_monitor_with_modes("src", vec![m(1920, 1080, 60.0)]);
