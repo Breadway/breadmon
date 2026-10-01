@@ -1,5 +1,11 @@
 # breadmon
 
+> **Deprecated.** Breadmon is no longer shipped with BOS or listed in bakery.
+> Use the Displays page in `bos-settings` for monitor layout, resolution,
+> scale, and rotation. Existing installs can be removed with
+> `bakery remove breadmon`; saved profiles under
+> `~/.config/breadmon/profiles/` are preserved.
+
 A terminal UI monitor manager for Hyprland. Lets you position, configure, and mirror displays interactively, then apply a live layout on [BOS](https://git.breadway.dev/breadway/bos)-patched Hyprland.
 
 The Display panel in `bos-settings` (GUI) and breadmon (TUI) share `~/.config/hypr/monitors.json`, the layout Hyprland reads at login/reload. Applying in breadmon writes that file so the settings app and the next session stay in sync. Named profiles remain optional snapshots under `~/.config/breadmon/profiles/`.
@@ -10,15 +16,9 @@ The Display panel in `bos-settings` (GUI) and breadmon (TUI) share `~/.config/hy
 - The `hyprctl` binary must be on `PATH`
 - Rust toolchain (to build from source)
 
-## Install
+## Build from source
 
-Via [bakery](https://git.breadway.dev/Breadway/bread-ecosystem), the bread ecosystem package manager:
-
-```
-bakery install breadmon
-```
-
-Or build from source:
+The last released version is 0.1.5. To build the archived source:
 
 ```
 cargo build --release

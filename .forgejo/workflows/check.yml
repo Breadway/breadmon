@@ -1,15 +1,9 @@
 name: check
 
-# Fast-fail lint/test on short-lived work branches, before it ever reaches
-# main and triggers a dev-track release build.
-#
-# Builds in the same dev mode as dev-release.yml (git.breadway.dev
-# dependencies patched to their own repo's main via bread-ecosystem's
-# scripts/dev-deps.sh, no --locked), so a PR that depends on a
-# just-merged, not-yet-tagged change in bread-ecosystem passes here
-# instead of only being testable after a tag bump. See bread-ecosystem's
-# docs/release-channels.md ("Cross-repo dependency resolution") for the
-# full model. Part of ECO-38.
+# Lint and test maintenance branches. Dependencies resolve against their
+# own main branches through bread-ecosystem's scripts/dev-deps.sh, so a
+# maintenance PR can use a newly merged shared change before a release tag.
+# This deprecated project has no release jobs.
 on:
   push:
     branches: ['feature/**', 'fix/**']
