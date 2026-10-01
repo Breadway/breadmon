@@ -18,7 +18,7 @@ The Display panel in `bos-settings` (GUI) and breadmon (TUI) share `~/.config/hy
 
 ## Build from source
 
-The last released version is 0.1.5. To build the archived source:
+The last released version is 0.1.5. To build from source:
 
 ```
 cargo build --release
