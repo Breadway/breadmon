@@ -378,11 +378,11 @@ pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
         if stdout != "ok" {
             if is_missing_eval_extension(&stdout) {
                 return Err(anyhow::anyhow!(
-                    "breadmon: `hyprctl eval` (and the `hl.monitor()` Lua extension it uses \
+                    "breadmon: `hyprctl eval` (and the `hl.monitor()` Lua call it uses \
                      to apply monitor changes) is not available on this compositor. \
-                     This feature requires BOS (Bread OS)'s patched Hyprland build; it \
-                     does not exist on vanilla/upstream Hyprland. See the breadmon README \
-                     for details. (raw hyprctl response: {stdout:?})"
+                     Live apply needs Hyprland configured with hyprland.lua; it is not \
+                     available when Hyprland is configured with hyprland.conf. See the \
+                     breadmon README for details. (raw hyprctl response: {stdout:?})"
                 ));
             }
             return Err(anyhow::anyhow!("hyprctl: {}", stdout));
@@ -390,21 +390,43 @@ pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
     }
 
     for name in dpms_off {
-        Command::new("hyprctl")
-            .args(["dispatch", "dpms", "off", &name])
+        let output = Command::new("hyprctl")
+            .args(["eval", &dpms_off_expr(&name)])
             .output()
             .await
-            .context("hyprctl dispatch dpms off failed")?;
+            .context("hyprctl eval (dpms off) failed")?;
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if stdout != "ok" {
+            return Err(anyhow::anyhow!("hyprctl (dpms off {name}): {stdout}"));
+        }
     }
 
     Ok(())
 }
 
-/// Vanilla/upstream Hyprland doesn't recognize the `eval` request at all
-/// (BOS's Hyprland fork adds it, along with the `hl.monitor()` Lua global
-/// used above), and responds with an "unknown request" style message rather
-/// than an error about `hl`. Detect that case so we can point the user at
-/// the actual cause instead of surfacing the raw hyprctl text.
+/// The Lua expression that switches `monitor` off. Hyprland configured with
+/// `hyprland.lua` parses `hyprctl dispatch` arguments as Lua, so the legacy
+/// `dispatch dpms off <name>` form fails there.
+/// `hl.dsp.dpms` takes `action` and `monitor` fields.
+fn dpms_off_expr(monitor: &str) -> String {
+    let mut quoted = String::with_capacity(monitor.len() + 2);
+    quoted.push('\'');
+    for c in monitor.chars() {
+        match c {
+            '\\' => quoted.push_str("\\\\"),
+            '\'' => quoted.push_str("\\'"),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('\'');
+    format!("hl.dispatch(hl.dsp.dpms({{ action = 'off', monitor = {quoted} }}))")
+}
+
+/// Hyprland configured with `hyprland.conf` has no `eval` request (it comes
+/// with the `hl.monitor()` Lua global used above, which needs `hyprland.lua`),
+/// and responds with an "unknown request" style message rather than an error
+/// about `hl`. Detect that case so we can point the user at the actual cause
+/// instead of surfacing the raw hyprctl text.
 fn is_missing_eval_extension(hyprctl_stdout: &str) -> bool {
     let s = hyprctl_stdout.to_lowercase();
     s.contains("unknown request") || s.contains("unknown command")
@@ -418,6 +440,22 @@ mod eval_extension_tests {
     fn detects_unknown_request() {
         assert!(is_missing_eval_extension("unknown request"));
         assert!(is_missing_eval_extension("Unknown Request"));
+    }
+
+    #[test]
+    fn dpms_off_targets_the_named_monitor() {
+        assert_eq!(
+            super::dpms_off_expr("DP-1"),
+            "hl.dispatch(hl.dsp.dpms({ action = 'off', monitor = 'DP-1' }))"
+        );
+    }
+
+    #[test]
+    fn dpms_off_escapes_quotes_in_the_name() {
+        assert_eq!(
+            super::dpms_off_expr("a'b\\c"),
+            "hl.dispatch(hl.dsp.dpms({ action = 'off', monitor = 'a\\'b\\\\c' }))"
+        );
     }
 
     #[test]
