@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::ffi::OsStr;
 use tokio::process::Command;
@@ -318,6 +318,10 @@ pub fn format_hypr_line(m: &Monitor) -> String {
 }
 
 pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
+    apply_monitors_with(OsStr::new("hyprctl"), monitors).await
+}
+
+async fn apply_monitors_with(program: &OsStr, monitors: &[Monitor]) -> Result<()> {
     // breadmon stores mirror_of on the slave; hl.monitor() wants mirror= on the source.
     let mut mirror_slaves: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
     for m in monitors {
@@ -327,17 +331,16 @@ pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
     }
 
     let mut eval_stmts: Vec<String> = Vec::new();
-    let mut dpms_off: Vec<String> = Vec::new();
+    // Enabled monitors (mirror slaves included) with the DPMS state they should have.
+    let mut wanted: Vec<(&str, bool)> = Vec::new();
 
     for m in monitors {
         if m.disabled {
             continue;
         }
+        wanted.push((m.name.as_str(), m.dpms));
         if m.mirror_of.is_some() {
-            // Mirror slaves get no independent hl.monitor() call; only track DPMS.
-            if !m.dpms {
-                dpms_off.push(m.name.clone());
-            }
+            // Mirror slaves get no independent hl.monitor() call; only DPMS.
             continue;
         }
 
@@ -361,23 +364,63 @@ pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
 
         stmt.push_str(" })");
         eval_stmts.push(stmt);
+    }
 
-        if !m.dpms {
-            dpms_off.push(m.name.clone());
+    // Hyprland answers `ok` for a DPMS request naming a monitor that does not
+    // exist and then applies it to every output, so look every name up first.
+    // Only monitors whose live DPMS state differs get a dispatch.
+    let mut dpms_changes: Vec<(&str, &str)> = Vec::new();
+    if !wanted.is_empty() {
+        let live = live_monitor_dpms(program).await?;
+        for (name, want_on) in wanted {
+            let Some(&(_, is_on)) = live.iter().find(|(n, _)| n == name) else {
+                bail!("breadmon: cannot set DPMS for {name}: no monitor with that name exists");
+            };
+            if is_on != want_on {
+                dpms_changes.push((name, if want_on { "on" } else { "off" }));
+            }
         }
     }
 
     if !eval_stmts.is_empty() {
         let lua = eval_stmts.join("; ");
-        hyprctl_eval(OsStr::new("hyprctl"), "hyprctl eval", &lua).await?;
+        hyprctl_eval(program, "hyprctl eval", &lua).await?;
     }
 
-    for name in dpms_off {
-        let label = format!("hyprctl eval (dpms off {name})");
-        hyprctl_eval(OsStr::new("hyprctl"), &label, &dpms_off_expr(&name)).await?;
+    for (name, action) in dpms_changes {
+        let label = format!("hyprctl eval (dpms {action} {name})");
+        hyprctl_eval(program, &label, &dpms_expr(action, name)).await?;
     }
 
     Ok(())
+}
+
+/// `(name, dpmsStatus)` for every monitor Hyprland knows, from
+/// `<program> monitors all -j`. Fails unless the command exits 0 and its
+/// output parses.
+async fn live_monitor_dpms(program: &OsStr) -> Result<Vec<(String, bool)>> {
+    #[derive(Deserialize)]
+    struct Named {
+        name: String,
+        #[serde(rename = "dpmsStatus")]
+        dpms_status: bool,
+    }
+
+    let output = Command::new(program)
+        .args(["monitors", "all", "-j"])
+        .output()
+        .await
+        .context("hyprctl monitors all -j could not be run")?;
+    if !output.status.success() {
+        bail!(
+            "hyprctl monitors all -j failed: {}, stderr: {:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let named: Vec<Named> =
+        serde_json::from_slice(&output.stdout).context("failed to parse hyprctl monitors JSON")?;
+    Ok(named.into_iter().map(|m| (m.name, m.dpms_status)).collect())
 }
 
 /// Runs `<program> eval <lua>`. Succeeds only when the process exits 0 and
@@ -412,11 +455,11 @@ async fn hyprctl_eval(program: &OsStr, label: &str, lua: &str) -> Result<()> {
     ))
 }
 
-/// The Lua expression that switches `monitor` off. Hyprland configured with
-/// `hyprland.lua` parses `hyprctl dispatch` arguments as Lua, so the legacy
-/// `dispatch dpms off <name>` form fails there.
+/// The Lua expression that sets DPMS `action` (`on` or `off`) for `monitor`.
+/// Hyprland configured with `hyprland.lua` parses `hyprctl dispatch` arguments
+/// as Lua, so the legacy `dispatch dpms off <name>` form fails there.
 /// `hl.dsp.dpms` takes `action` and `monitor` fields.
-fn dpms_off_expr(monitor: &str) -> String {
+fn dpms_expr(action: &str, monitor: &str) -> String {
     let mut quoted = String::with_capacity(monitor.len() + 2);
     quoted.push('\'');
     for c in monitor.chars() {
@@ -427,7 +470,7 @@ fn dpms_off_expr(monitor: &str) -> String {
         }
     }
     quoted.push('\'');
-    format!("hl.dispatch(hl.dsp.dpms({{ action = 'off', monitor = {quoted} }}))")
+    format!("hl.dispatch(hl.dsp.dpms({{ action = '{action}', monitor = {quoted} }}))")
 }
 
 /// Hyprland configured with `hyprland.conf` has no `eval` request (it comes
@@ -515,6 +558,178 @@ mod hyprctl_eval_tests {
 }
 
 #[cfg(test)]
+mod dpms_apply_tests {
+    use super::{apply_monitors_with, Mode, Monitor, Transform};
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    // Same serialisation as hyprctl_eval_tests: no script is exec'd while
+    // another one is still open for writing (ETXTBSY).
+    static FAKE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    fn monitor(name: &str, dpms: bool) -> Monitor {
+        let mode = Mode {
+            width: 1920,
+            height: 1080,
+            refresh: 60.0,
+        };
+        Monitor {
+            name: name.into(),
+            description: String::new(),
+            active_mode: mode.clone(),
+            x: 0,
+            y: 0,
+            scale: 1.0,
+            transform: Transform::Normal,
+            vrr: false,
+            dpms,
+            disabled: false,
+            mirror_of: None,
+            available_modes: vec![mode],
+            physical_width_mm: 0,
+            physical_height_mm: 0,
+        }
+    }
+
+    /// Fake `hyprctl`: `monitors all -j` lists `eDP-1` and `HDMI-A-1`, both
+    /// with DPMS on, and `eval` records each Lua argument on its own line in
+    /// `log` and replies `ok`. Returns (dir, script path, log path).
+    fn fake_hyprctl(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("breadmon-dpms-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("eval.log");
+        let path = dir.join("hyprctl");
+        let body = format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = monitors ]; then\n\
+               printf '%s' '[{{\"name\":\"eDP-1\",\"dpmsStatus\":true}},{{\"name\":\"HDMI-A-1\",\"dpmsStatus\":true}}]'\n\
+               exit 0\n\
+             fi\n\
+             printf '%s\\n' \"$2\" >> '{}'\n\
+             printf 'ok\\n'\n",
+            log.display()
+        );
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (dir, path, log)
+    }
+
+    async fn run(name: &str, monitors: &[Monitor]) -> (anyhow::Result<()>, String) {
+        let _guard = FAKE_LOCK.lock().await;
+        let (dir, path, log) = fake_hyprctl(name);
+        let result = apply_monitors_with(path.as_os_str(), monitors).await;
+        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
+        std::fs::remove_dir_all(&dir).unwrap();
+        (result, recorded)
+    }
+
+    #[tokio::test]
+    async fn unknown_monitor_name_is_an_error_and_no_dpms_is_dispatched() {
+        let monitors = [monitor("eDP-1", true), monitor("NOPE-9", false)];
+        let (result, recorded) = run("unknown", &monitors).await;
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("NOPE-9"), "{err}");
+        assert!(!recorded.contains("dpms"), "{recorded}");
+        assert!(!recorded.contains("hl.monitor"), "{recorded}");
+    }
+
+    #[tokio::test]
+    async fn known_monitor_off_dispatches_dpms_off_for_that_name_only() {
+        let monitors = [monitor("eDP-1", true), monitor("HDMI-A-1", false)];
+        let (result, recorded) = run("off", &monitors).await;
+        assert!(result.is_ok(), "{result:?}");
+        let dpms_lines: Vec<&str> = recorded.lines().filter(|l| l.contains("dpms")).collect();
+        assert_eq!(
+            dpms_lines,
+            ["hl.dispatch(hl.dsp.dpms({ action = 'off', monitor = 'HDMI-A-1' }))"]
+        );
+    }
+
+    #[tokio::test]
+    async fn already_on_monitor_gets_no_dpms_dispatch() {
+        let monitors = [monitor("eDP-1", true), monitor("HDMI-A-1", true)];
+        let (result, recorded) = run("noop", &monitors).await;
+        assert!(result.is_ok(), "{result:?}");
+        assert!(!recorded.contains("dpms"), "{recorded}");
+    }
+
+    #[tokio::test]
+    async fn known_monitor_restored_from_off_dispatches_dpms_on_for_that_name_only() {
+        let _guard = FAKE_LOCK.lock().await;
+        let dir =
+            std::env::temp_dir().join(format!("breadmon-dpms-{}-restore", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("eval.log");
+        let path = dir.join("hyprctl");
+        let body = format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = monitors ]; then\n\
+               printf '%s' '[{{\"name\":\"eDP-1\",\"dpmsStatus\":true}},{{\"name\":\"HDMI-A-1\",\"dpmsStatus\":false}}]'\n\
+               exit 0\n\
+             fi\n\
+             printf '%s\\n' \"$2\" >> '{}'\n\
+             printf 'ok\\n'\n",
+            log.display()
+        );
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let monitors = [monitor("eDP-1", true), monitor("HDMI-A-1", true)];
+        let result = apply_monitors_with(path.as_os_str(), &monitors).await;
+        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(result.is_ok(), "{result:?}");
+        let dpms_lines: Vec<&str> = recorded.lines().filter(|l| l.contains("dpms")).collect();
+        assert_eq!(
+            dpms_lines,
+            ["hl.dispatch(hl.dsp.dpms({ action = 'on', monitor = 'HDMI-A-1' }))"]
+        );
+    }
+
+    #[tokio::test]
+    async fn monitors_query_failure_stops_before_any_dpms() {
+        let _guard = FAKE_LOCK.lock().await;
+        let dir =
+            std::env::temp_dir().join(format!("breadmon-dpms-{}-badquery", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("eval.log");
+        let path = dir.join("hyprctl");
+        let body = format!(
+            "#!/bin/sh\nif [ \"$1\" = monitors ]; then echo '[]'; exit 3; fi\necho \"$2\" >> '{}'\necho ok\n",
+            log.display()
+        );
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let monitors = [monitor("eDP-1", false)];
+        let result = apply_monitors_with(path.as_os_str(), &monitors).await;
+        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(result.is_err());
+        assert!(recorded.is_empty(), "{recorded}");
+    }
+
+    #[tokio::test]
+    async fn monitors_query_nonzero_exit_with_valid_json_is_an_error() {
+        let _guard = FAKE_LOCK.lock().await;
+        let dir = std::env::temp_dir().join(format!("breadmon-dpms-{}-exit3", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("eval.log");
+        let path = dir.join("hyprctl");
+        let body = format!(
+            "#!/bin/sh\nif [ \"$1\" = monitors ]; then echo '[{{\"name\":\"eDP-1\",\"dpmsStatus\":true}}]'; exit 3; fi\necho \"$2\" >> '{}'\necho ok\n",
+            log.display()
+        );
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let monitors = [monitor("eDP-1", true)];
+        let result = apply_monitors_with(path.as_os_str(), &monitors).await;
+        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(result.is_err());
+        assert!(recorded.is_empty(), "{recorded}");
+    }
+}
+
+#[cfg(test)]
 mod eval_extension_tests {
     use super::is_missing_eval_extension;
 
@@ -527,15 +742,23 @@ mod eval_extension_tests {
     #[test]
     fn dpms_off_targets_the_named_monitor() {
         assert_eq!(
-            super::dpms_off_expr("DP-1"),
+            super::dpms_expr("off", "DP-1"),
             "hl.dispatch(hl.dsp.dpms({ action = 'off', monitor = 'DP-1' }))"
         );
     }
 
     #[test]
-    fn dpms_off_escapes_quotes_in_the_name() {
+    fn dpms_on_targets_the_named_monitor() {
         assert_eq!(
-            super::dpms_off_expr("a'b\\c"),
+            super::dpms_expr("on", "DP-1"),
+            "hl.dispatch(hl.dsp.dpms({ action = 'on', monitor = 'DP-1' }))"
+        );
+    }
+
+    #[test]
+    fn dpms_expr_escapes_quotes_in_the_name() {
+        assert_eq!(
+            super::dpms_expr("off", "a'b\\c"),
             "hl.dispatch(hl.dsp.dpms({ action = 'off', monitor = 'a\\'b\\\\c' }))"
         );
     }
