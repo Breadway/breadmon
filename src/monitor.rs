@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::ffi::OsStr;
 use tokio::process::Command;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -368,40 +369,47 @@ pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
 
     if !eval_stmts.is_empty() {
         let lua = eval_stmts.join("; ");
-        let output = Command::new("hyprctl")
-            .args(["eval", &lua])
-            .output()
-            .await
-            .context("hyprctl eval failed")?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if stdout != "ok" {
-            if is_missing_eval_extension(&stdout) {
-                return Err(anyhow::anyhow!(
-                    "breadmon: `hyprctl eval` (and the `hl.monitor()` Lua call it uses \
-                     to apply monitor changes) is not available on this compositor. \
-                     Live apply needs Hyprland configured with hyprland.lua; it is not \
-                     available when Hyprland is configured with hyprland.conf. See the \
-                     breadmon README for details. (raw hyprctl response: {stdout:?})"
-                ));
-            }
-            return Err(anyhow::anyhow!("hyprctl: {}", stdout));
-        }
+        hyprctl_eval(OsStr::new("hyprctl"), "hyprctl eval", &lua).await?;
     }
 
     for name in dpms_off {
-        let output = Command::new("hyprctl")
-            .args(["eval", &dpms_off_expr(&name)])
-            .output()
-            .await
-            .context("hyprctl eval (dpms off) failed")?;
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if stdout != "ok" {
-            return Err(anyhow::anyhow!("hyprctl (dpms off {name}): {stdout}"));
-        }
+        let label = format!("hyprctl eval (dpms off {name})");
+        hyprctl_eval(OsStr::new("hyprctl"), &label, &dpms_off_expr(&name)).await?;
     }
 
     Ok(())
+}
+
+/// Runs `<program> eval <lua>`. Succeeds only when the process exits 0 and
+/// its trimmed stdout is exactly `ok`; otherwise the error carries the exit
+/// status, stdout and stderr.
+async fn hyprctl_eval(program: &OsStr, label: &str, lua: &str) -> Result<()> {
+    let output = Command::new(program)
+        .args(["eval", lua])
+        .output()
+        .await
+        .with_context(|| format!("{label} could not be run"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if output.status.success() && stdout == "ok" {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if is_missing_eval_extension(&format!("{stdout}\n{stderr}")) {
+        return Err(anyhow::anyhow!(
+            "breadmon: `hyprctl eval` (and the `hl.monitor()` Lua call it uses \
+             to apply monitor changes) is not available on this compositor. \
+             Live apply needs Hyprland configured with hyprland.lua; it is not \
+             available when Hyprland is configured with hyprland.conf. See the \
+             breadmon README for details. ({label} {}, stdout: {stdout:?}, stderr: {stderr:?})",
+            output.status
+        ));
+    }
+    Err(anyhow::anyhow!(
+        "{label} failed: {}, stdout: {stdout:?}, stderr: {stderr:?}",
+        output.status
+    ))
 }
 
 /// The Lua expression that switches `monitor` off. Hyprland configured with
@@ -430,6 +438,80 @@ fn dpms_off_expr(monitor: &str) -> String {
 fn is_missing_eval_extension(hyprctl_stdout: &str) -> bool {
     let s = hyprctl_stdout.to_lowercase();
     s.contains("unknown request") || s.contains("unknown command")
+}
+
+#[cfg(test)]
+mod hyprctl_eval_tests {
+    use super::hyprctl_eval;
+    use std::ffi::OsString;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    // Fake hyprctl scripts are written and exec'd by parallel tests; serialise
+    // them so no test forks while another script is still open for writing
+    // (which would fail with ETXTBSY).
+    static FAKE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    fn fake_hyprctl(name: &str, body: &str) -> (PathBuf, PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("breadmon-hyprctl-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("hyprctl");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (dir, path)
+    }
+
+    async fn run(name: &str, body: &str) -> anyhow::Result<()> {
+        let _guard = FAKE_LOCK.lock().await;
+        let (dir, path) = fake_hyprctl(name, body);
+        let result = hyprctl_eval(path.as_os_str(), "hyprctl eval", "hl.dispatch(x)").await;
+        std::fs::remove_dir_all(&dir).unwrap();
+        result
+    }
+
+    #[tokio::test]
+    async fn ok_with_exit_zero_succeeds() {
+        assert!(run("ok0", "printf 'ok\\n'; exit 0").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn surrounding_whitespace_around_ok_is_trimmed() {
+        assert!(run("ws", "printf '  ok \\n'; exit 0").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn refusal_with_exit_zero_is_an_error_with_stdout_and_stderr() {
+        let err = run("refuse0", "printf 'refused'; printf 'detail' >&2; exit 0")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("exit status: 0"), "{err}");
+        assert!(err.contains("refused"), "{err}");
+        assert!(err.contains("detail"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ok_with_nonzero_exit_is_an_error_with_exit_status() {
+        let err = run("ok7", "printf 'ok\\n'; printf 'boom' >&2; exit 7")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("exit status: 7"), "{err}");
+        assert!(err.contains("boom"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn empty_output_with_exit_zero_is_an_error() {
+        assert!(run("empty", "exit 0").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn spawn_failure_is_an_error() {
+        let _guard = FAKE_LOCK.lock().await;
+        let missing = OsString::from("/nonexistent/breadmon-no-hyprctl");
+        assert!(hyprctl_eval(&missing, "hyprctl eval", "x").await.is_err());
+    }
 }
 
 #[cfg(test)]
