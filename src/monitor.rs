@@ -484,51 +484,165 @@ fn is_missing_eval_extension(hyprctl_stdout: &str) -> bool {
 }
 
 #[cfg(test)]
-mod hyprctl_eval_tests {
-    use super::hyprctl_eval;
-    use std::ffi::OsString;
+mod fake_harness {
+    //! Fake-`hyprctl` scripts shared by the monitor tests.
+    //!
+    //! Every fake is created once, up front, under a process-wide
+    //! `OnceLock`, before any test execs one; afterwards tests only exec,
+    //! append to their eval log, and clean up. No test ever writes a
+    //! script while another test is spawning.
+    //!
+    //! Phase separation matters because unique paths alone do not stop
+    //! ETXTBSY here: exec'ing a freshly-written script while other
+    //! threads are concurrently writing (different) scripts fails with
+    //! "Text file busy" a few percent of the time on this kernel, even
+    //! though every path is unique and closed before exec (stress
+    //! reproduced at ~1-8% of spawns with plain `std::process::Command`).
+    //! Pre-created scripts exec'd under the same concurrency, with the
+    //! same log-append and cleanup churn, never fail. Each fake also gets
+    //! its own dir (pid + start time + ASLR address), so concurrent CI
+    //! jobs sharing the runner's `/tmp` never share a path, and each
+    //! eval log stays per-test.
+    use std::collections::HashMap;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
-    // Fake hyprctl scripts are written and exec'd by parallel tests; serialise
-    // them so no test forks while another script is still open for writing
-    // (which would fail with ETXTBSY).
-    static FAKE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-    fn fake_hyprctl(name: &str, body: &str) -> (PathBuf, PathBuf) {
-        let dir =
-            std::env::temp_dir().join(format!("breadmon-hyprctl-{}-{name}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("hyprctl");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        (dir, path)
+    pub struct Fake {
+        pub dir: PathBuf,
+        pub script: PathBuf,
+        pub log: PathBuf,
     }
 
-    async fn run(name: &str, body: &str) -> anyhow::Result<()> {
-        let _guard = FAKE_LOCK.lock().await;
-        let (dir, path) = fake_hyprctl(name, body);
-        let result = hyprctl_eval(path.as_os_str(), "hyprctl eval", "hl.dispatch(x)").await;
-        std::fs::remove_dir_all(&dir).unwrap();
+    const ALL_ON: &str =
+        r#"[{"name":"eDP-1","dpmsStatus":true},{"name":"HDMI-A-1","dpmsStatus":true}]"#;
+    const EDP_ON_HDMI_OFF: &str =
+        r#"[{"name":"eDP-1","dpmsStatus":true},{"name":"HDMI-A-1","dpmsStatus":false}]"#;
+    const SINGLE_ON: &str = r#"[{"name":"eDP-1","dpmsStatus":true}]"#;
+
+    /// (test name, shell body) for plain `eval` fakes.
+    const EVAL: &[(&str, &str)] = &[
+        ("ok0", "printf 'ok\\n'; exit 0"),
+        ("ws", "printf '  ok \\n'; exit 0"),
+        ("refuse0", "printf 'refused'; printf 'detail' >&2; exit 0"),
+        ("ok7", "printf 'ok\\n'; printf 'boom' >&2; exit 7"),
+        ("empty", "exit 0"),
+    ];
+
+    /// (test name, `monitors all -j` JSON, its exit code) for DPMS fakes.
+    /// The `eval` branch records each Lua argument in the test's log.
+    const DPMS: &[(&str, &str, i32)] = &[
+        ("unknown", ALL_ON, 0),
+        ("off", ALL_ON, 0),
+        ("noop", ALL_ON, 0),
+        ("restore", EDP_ON_HDMI_OFF, 0),
+        ("badquery", "[]", 3),
+        ("exit3", SINGLE_ON, 3),
+    ];
+
+    static FAKES: std::sync::OnceLock<HashMap<&'static str, Fake>> = std::sync::OnceLock::new();
+
+    fn setup() -> &'static HashMap<&'static str, Fake> {
+        FAKES.get_or_init(|| {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            // The static's address varies per process (ASLR); with pid and
+            // start time it separates concurrent jobs sharing /tmp, where
+            // pids can collide across containers.
+            let tag = format!(
+                "{}-{nanos}-{:x}",
+                std::process::id(),
+                &FAKES as *const std::sync::OnceLock<HashMap<&'static str, Fake>> as usize
+            );
+            let mut m = HashMap::new();
+            for (name, body) in EVAL {
+                let script = format!("#!/bin/sh\n{body}\n");
+                m.insert(*name, write_fake(&tag, name, &script));
+            }
+            for (name, monitors_json, monitors_exit) in DPMS {
+                m.insert(
+                    *name,
+                    write_dpms_fake(&tag, name, monitors_json, *monitors_exit),
+                );
+            }
+            m
+        })
+    }
+
+    fn write_fake(tag: &str, name: &str, script_body: &str) -> Fake {
+        let dir = std::env::temp_dir().join(format!("breadmon-fake-{tag}-{name}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("eval.log");
+        std::fs::write(&log, "").unwrap();
+        // Write-then-rename so the final path is never observed half-written.
+        let tmp = dir.join(".hyprctl.tmp");
+        std::fs::write(&tmp, script_body).unwrap();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = dir.join("hyprctl");
+        std::fs::rename(&tmp, &script).unwrap();
+        Fake { dir, script, log }
+    }
+
+    fn write_dpms_fake(tag: &str, name: &str, monitors_json: &str, monitors_exit: i32) -> Fake {
+        // The log is created first so its path can be baked into the script.
+        let dir = std::env::temp_dir().join(format!("breadmon-fake-{tag}-{name}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("eval.log");
+        std::fs::write(&log, "").unwrap();
+        let body = format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = monitors ]; then\n\
+               printf '%s' '{monitors_json}'\n\
+               exit {monitors_exit}\n\
+             fi\n\
+             printf '%s\\n' \"$2\" >> '{}'\n\
+             printf 'ok\\n'\n",
+            log.display()
+        );
+        let tmp = dir.join(".hyprctl.tmp");
+        std::fs::write(&tmp, body).unwrap();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = dir.join("hyprctl");
+        std::fs::rename(&tmp, &script).unwrap();
+        Fake { dir, script, log }
+    }
+
+    /// The pre-created fake for test `name`. Blocks until setup finishes,
+    /// so no caller execs while any script is still being written.
+    pub fn get(name: &'static str) -> &'static Fake {
+        &setup()[name]
+    }
+}
+
+#[cfg(test)]
+mod hyprctl_eval_tests {
+    use super::fake_harness;
+    use super::hyprctl_eval;
+    use std::ffi::OsString;
+
+    // Scripts are pre-created under a process-wide OnceLock (see
+    // fake_harness); tests only exec, so parallel tests need no locking.
+    async fn run(name: &'static str) -> anyhow::Result<()> {
+        let fake = fake_harness::get(name);
+        let result = hyprctl_eval(fake.script.as_os_str(), "hyprctl eval", "hl.dispatch(x)").await;
+        std::fs::remove_dir_all(&fake.dir).unwrap();
         result
     }
 
     #[tokio::test]
     async fn ok_with_exit_zero_succeeds() {
-        assert!(run("ok0", "printf 'ok\\n'; exit 0").await.is_ok());
+        assert!(run("ok0").await.is_ok());
     }
 
     #[tokio::test]
     async fn surrounding_whitespace_around_ok_is_trimmed() {
-        assert!(run("ws", "printf '  ok \\n'; exit 0").await.is_ok());
+        assert!(run("ws").await.is_ok());
     }
 
     #[tokio::test]
     async fn refusal_with_exit_zero_is_an_error_with_stdout_and_stderr() {
-        let err = run("refuse0", "printf 'refused'; printf 'detail' >&2; exit 0")
-            .await
-            .unwrap_err()
-            .to_string();
+        let err = run("refuse0").await.unwrap_err().to_string();
         assert!(err.contains("exit status: 0"), "{err}");
         assert!(err.contains("refused"), "{err}");
         assert!(err.contains("detail"), "{err}");
@@ -536,22 +650,18 @@ mod hyprctl_eval_tests {
 
     #[tokio::test]
     async fn ok_with_nonzero_exit_is_an_error_with_exit_status() {
-        let err = run("ok7", "printf 'ok\\n'; printf 'boom' >&2; exit 7")
-            .await
-            .unwrap_err()
-            .to_string();
+        let err = run("ok7").await.unwrap_err().to_string();
         assert!(err.contains("exit status: 7"), "{err}");
         assert!(err.contains("boom"), "{err}");
     }
 
     #[tokio::test]
     async fn empty_output_with_exit_zero_is_an_error() {
-        assert!(run("empty", "exit 0").await.is_err());
+        assert!(run("empty").await.is_err());
     }
 
     #[tokio::test]
     async fn spawn_failure_is_an_error() {
-        let _guard = FAKE_LOCK.lock().await;
         let missing = OsString::from("/nonexistent/breadmon-no-hyprctl");
         assert!(hyprctl_eval(&missing, "hyprctl eval", "x").await.is_err());
     }
@@ -559,13 +669,11 @@ mod hyprctl_eval_tests {
 
 #[cfg(test)]
 mod dpms_apply_tests {
+    use super::fake_harness;
     use super::{apply_monitors_with, Mode, Monitor, Transform};
-    use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
 
-    // Same serialisation as hyprctl_eval_tests: no script is exec'd while
-    // another one is still open for writing (ETXTBSY).
-    static FAKE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    // Fakes are pre-created under a process-wide OnceLock (see
+    // fake_harness); tests only exec, so parallel tests need no locking.
 
     fn monitor(name: &str, dpms: bool) -> Monitor {
         let mode = Mode {
@@ -591,35 +699,11 @@ mod dpms_apply_tests {
         }
     }
 
-    /// Fake `hyprctl`: `monitors all -j` lists `eDP-1` and `HDMI-A-1`, both
-    /// with DPMS on, and `eval` records each Lua argument on its own line in
-    /// `log` and replies `ok`. Returns (dir, script path, log path).
-    fn fake_hyprctl(name: &str) -> (PathBuf, PathBuf, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("breadmon-dpms-{}-{name}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let log = dir.join("eval.log");
-        let path = dir.join("hyprctl");
-        let body = format!(
-            "#!/bin/sh\n\
-             if [ \"$1\" = monitors ]; then\n\
-               printf '%s' '[{{\"name\":\"eDP-1\",\"dpmsStatus\":true}},{{\"name\":\"HDMI-A-1\",\"dpmsStatus\":true}}]'\n\
-               exit 0\n\
-             fi\n\
-             printf '%s\\n' \"$2\" >> '{}'\n\
-             printf 'ok\\n'\n",
-            log.display()
-        );
-        std::fs::write(&path, body).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        (dir, path, log)
-    }
-
-    async fn run(name: &str, monitors: &[Monitor]) -> (anyhow::Result<()>, String) {
-        let _guard = FAKE_LOCK.lock().await;
-        let (dir, path, log) = fake_hyprctl(name);
-        let result = apply_monitors_with(path.as_os_str(), monitors).await;
-        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
-        std::fs::remove_dir_all(&dir).unwrap();
+    async fn run(name: &'static str, monitors: &[Monitor]) -> (anyhow::Result<()>, String) {
+        let fake = fake_harness::get(name);
+        let result = apply_monitors_with(fake.script.as_os_str(), monitors).await;
+        let recorded = std::fs::read_to_string(&fake.log).unwrap_or_default();
+        std::fs::remove_dir_all(&fake.dir).unwrap();
         (result, recorded)
     }
 
@@ -655,28 +739,8 @@ mod dpms_apply_tests {
 
     #[tokio::test]
     async fn known_monitor_restored_from_off_dispatches_dpms_on_for_that_name_only() {
-        let _guard = FAKE_LOCK.lock().await;
-        let dir =
-            std::env::temp_dir().join(format!("breadmon-dpms-{}-restore", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let log = dir.join("eval.log");
-        let path = dir.join("hyprctl");
-        let body = format!(
-            "#!/bin/sh\n\
-             if [ \"$1\" = monitors ]; then\n\
-               printf '%s' '[{{\"name\":\"eDP-1\",\"dpmsStatus\":true}},{{\"name\":\"HDMI-A-1\",\"dpmsStatus\":false}}]'\n\
-               exit 0\n\
-             fi\n\
-             printf '%s\\n' \"$2\" >> '{}'\n\
-             printf 'ok\\n'\n",
-            log.display()
-        );
-        std::fs::write(&path, body).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let monitors = [monitor("eDP-1", true), monitor("HDMI-A-1", true)];
-        let result = apply_monitors_with(path.as_os_str(), &monitors).await;
-        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
-        std::fs::remove_dir_all(&dir).unwrap();
+        let (result, recorded) = run("restore", &monitors).await;
         assert!(result.is_ok(), "{result:?}");
         let dpms_lines: Vec<&str> = recorded.lines().filter(|l| l.contains("dpms")).collect();
         assert_eq!(
@@ -687,43 +751,16 @@ mod dpms_apply_tests {
 
     #[tokio::test]
     async fn monitors_query_failure_stops_before_any_dpms() {
-        let _guard = FAKE_LOCK.lock().await;
-        let dir =
-            std::env::temp_dir().join(format!("breadmon-dpms-{}-badquery", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let log = dir.join("eval.log");
-        let path = dir.join("hyprctl");
-        let body = format!(
-            "#!/bin/sh\nif [ \"$1\" = monitors ]; then echo '[]'; exit 3; fi\necho \"$2\" >> '{}'\necho ok\n",
-            log.display()
-        );
-        std::fs::write(&path, body).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let monitors = [monitor("eDP-1", false)];
-        let result = apply_monitors_with(path.as_os_str(), &monitors).await;
-        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
-        std::fs::remove_dir_all(&dir).unwrap();
+        let (result, recorded) = run("badquery", &monitors).await;
         assert!(result.is_err());
         assert!(recorded.is_empty(), "{recorded}");
     }
 
     #[tokio::test]
     async fn monitors_query_nonzero_exit_with_valid_json_is_an_error() {
-        let _guard = FAKE_LOCK.lock().await;
-        let dir = std::env::temp_dir().join(format!("breadmon-dpms-{}-exit3", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let log = dir.join("eval.log");
-        let path = dir.join("hyprctl");
-        let body = format!(
-            "#!/bin/sh\nif [ \"$1\" = monitors ]; then echo '[{{\"name\":\"eDP-1\",\"dpmsStatus\":true}}]'; exit 3; fi\necho \"$2\" >> '{}'\necho ok\n",
-            log.display()
-        );
-        std::fs::write(&path, body).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let monitors = [monitor("eDP-1", true)];
-        let result = apply_monitors_with(path.as_os_str(), &monitors).await;
-        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
-        std::fs::remove_dir_all(&dir).unwrap();
+        let (result, recorded) = run("exit3", &monitors).await;
         assert!(result.is_err());
         assert!(recorded.is_empty(), "{recorded}");
     }
