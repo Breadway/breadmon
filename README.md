@@ -6,13 +6,13 @@
 > `bakery remove breadmon`; saved profiles under
 > `~/.config/breadmon/profiles/` are preserved.
 
-A terminal UI monitor manager for Hyprland. Lets you position, configure, and mirror displays interactively, then apply a live layout on [BOS](https://git.breadway.dev/breadway/bos)-patched Hyprland.
+A terminal UI monitor manager for Hyprland. Lets you position, configure, and mirror displays interactively, then apply a live layout on Hyprland configured with `hyprland.lua` (as on [BOS](https://git.breadway.dev/breadway/bos)).
 
 The Display panel in `bos-settings` (GUI) and breadmon (TUI) share `~/.config/hypr/monitors.json`, the layout Hyprland reads at login/reload. Applying in breadmon writes that file so the settings app and the next session stay in sync. Named profiles remain optional snapshots under `~/.config/breadmon/profiles/`.
 
 ## Requirements
 
-- **[BOS (Bread OS)](https://git.breadway.dev/breadway/bos)'s patched Hyprland build** for live apply. The `a` key runs `hyprctl eval 'hl.monitor({...})'`, a BOS-specific Lua extension. Vanilla/upstream Hyprland has no `eval` request and no `hl.monitor()`, so apply will fail there with an explicit error instead of the raw hyprctl response. Viewing, arranging, and saving profiles work on any Hyprland; only live apply needs BOS.
+- **Hyprland configured with `hyprland.lua`** (as on [BOS (Bread OS)](https://git.breadway.dev/breadway/bos)) for live apply. The `a` key runs `hyprctl eval 'hl.monitor({...})'`, and switches monitors off with `hyprctl eval "hl.dispatch(hl.dsp.dpms({ action = 'off', monitor = '<name>' }))"`. Hyprland configured with `hyprland.conf` has no `eval` request, so apply will fail there with an explicit error instead of the raw hyprctl response. Viewing, arranging, and saving profiles work with either configuration; only live apply needs `hyprland.lua`.
 - The `hyprctl` binary must be on `PATH`
 - Rust toolchain (to build from source)
 
@@ -95,7 +95,7 @@ Profiles are saved to `~/.config/breadmon/profiles/`.
 
 | Key | Action |
 |-----|--------|
-| `a` | Apply current configuration via `hyprctl eval 'hl.monitor({...})'` (BOS-patched Hyprland only) and write `~/.config/hypr/monitors.json` |
+| `a` | Apply current configuration via `hyprctl eval 'hl.monitor({...})'` (needs Hyprland configured with `hyprland.lua`) and write `~/.config/hypr/monitors.json` |
 | `s` | Write `~/.config/hypr/monitors.json` without a live apply |
 | `r` | Refresh monitor list from Hyprland |
 | `Ctrl+Z` | Undo last change (up to 20 steps) |
@@ -121,4 +121,4 @@ Empty `output` is the wildcard default (any connector). breadmon loads this file
 
 ## bread event integration
 
-breadmon works the same with or without `breadd`. After a successful live apply (`hyprctl eval 'hl.monitor({...})'` on BOS-patched Hyprland, not the `bos-settings` Display panel), it publishes `bread.mon.applied`. If breadd is down, the emit is a silent no-op; apply itself is unchanged. See [EVENTS.md](EVENTS.md) for the bus contract. `bread` is not a bakery dependency.
+breadmon works the same with or without `breadd`. After a successful live apply (`hyprctl eval 'hl.monitor({...})'` on Hyprland configured with `hyprland.lua`, not the `bos-settings` Display panel), it publishes `bread.mon.applied`. If breadd is down, the emit is a silent no-op; apply itself is unchanged. See [EVENTS.md](EVENTS.md) for the bus contract. `bread` is not a bakery dependency.

@@ -1,5 +1,6 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
+use std::ffi::OsStr;
 use tokio::process::Command;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -317,6 +318,10 @@ pub fn format_hypr_line(m: &Monitor) -> String {
 }
 
 pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
+    apply_monitors_with(OsStr::new("hyprctl"), monitors).await
+}
+
+async fn apply_monitors_with(program: &OsStr, monitors: &[Monitor]) -> Result<()> {
     // breadmon stores mirror_of on the slave; hl.monitor() wants mirror= on the source.
     let mut mirror_slaves: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
     for m in monitors {
@@ -326,17 +331,16 @@ pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
     }
 
     let mut eval_stmts: Vec<String> = Vec::new();
-    let mut dpms_off: Vec<String> = Vec::new();
+    // Enabled monitors (mirror slaves included) with the DPMS state they should have.
+    let mut wanted: Vec<(&str, bool)> = Vec::new();
 
     for m in monitors {
         if m.disabled {
             continue;
         }
+        wanted.push((m.name.as_str(), m.dpms));
         if m.mirror_of.is_some() {
-            // Mirror slaves get no independent hl.monitor() call; only track DPMS.
-            if !m.dpms {
-                dpms_off.push(m.name.clone());
-            }
+            // Mirror slaves get no independent hl.monitor() call; only DPMS.
             continue;
         }
 
@@ -360,54 +364,406 @@ pub async fn apply_monitors(monitors: &[Monitor]) -> Result<()> {
 
         stmt.push_str(" })");
         eval_stmts.push(stmt);
+    }
 
-        if !m.dpms {
-            dpms_off.push(m.name.clone());
+    // Hyprland answers `ok` for a DPMS request naming a monitor that does not
+    // exist and then applies it to every output, so look every name up first.
+    // Only monitors whose live DPMS state differs get a dispatch.
+    let mut dpms_changes: Vec<(&str, &str)> = Vec::new();
+    if !wanted.is_empty() {
+        let live = live_monitor_dpms(program).await?;
+        for (name, want_on) in wanted {
+            let Some(&(_, is_on)) = live.iter().find(|(n, _)| n == name) else {
+                bail!("breadmon: cannot set DPMS for {name}: no monitor with that name exists");
+            };
+            if is_on != want_on {
+                dpms_changes.push((name, if want_on { "on" } else { "off" }));
+            }
         }
     }
 
     if !eval_stmts.is_empty() {
         let lua = eval_stmts.join("; ");
-        let output = Command::new("hyprctl")
-            .args(["eval", &lua])
-            .output()
-            .await
-            .context("hyprctl eval failed")?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if stdout != "ok" {
-            if is_missing_eval_extension(&stdout) {
-                return Err(anyhow::anyhow!(
-                    "breadmon: `hyprctl eval` (and the `hl.monitor()` Lua extension it uses \
-                     to apply monitor changes) is not available on this compositor. \
-                     This feature requires BOS (Bread OS)'s patched Hyprland build; it \
-                     does not exist on vanilla/upstream Hyprland. See the breadmon README \
-                     for details. (raw hyprctl response: {stdout:?})"
-                ));
-            }
-            return Err(anyhow::anyhow!("hyprctl: {}", stdout));
-        }
+        hyprctl_eval(program, "hyprctl eval", &lua).await?;
     }
 
-    for name in dpms_off {
-        Command::new("hyprctl")
-            .args(["dispatch", "dpms", "off", &name])
-            .output()
-            .await
-            .context("hyprctl dispatch dpms off failed")?;
+    for (name, action) in dpms_changes {
+        let label = format!("hyprctl eval (dpms {action} {name})");
+        hyprctl_eval(program, &label, &dpms_expr(action, name)).await?;
     }
 
     Ok(())
 }
 
-/// Vanilla/upstream Hyprland doesn't recognize the `eval` request at all
-/// (BOS's Hyprland fork adds it, along with the `hl.monitor()` Lua global
-/// used above), and responds with an "unknown request" style message rather
-/// than an error about `hl`. Detect that case so we can point the user at
-/// the actual cause instead of surfacing the raw hyprctl text.
+/// `(name, dpmsStatus)` for every monitor Hyprland knows, from
+/// `<program> monitors all -j`. Fails unless the command exits 0 and its
+/// output parses.
+async fn live_monitor_dpms(program: &OsStr) -> Result<Vec<(String, bool)>> {
+    #[derive(Deserialize)]
+    struct Named {
+        name: String,
+        #[serde(rename = "dpmsStatus")]
+        dpms_status: bool,
+    }
+
+    let output = Command::new(program)
+        .args(["monitors", "all", "-j"])
+        .output()
+        .await
+        .context("hyprctl monitors all -j could not be run")?;
+    if !output.status.success() {
+        bail!(
+            "hyprctl monitors all -j failed: {}, stderr: {:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let named: Vec<Named> =
+        serde_json::from_slice(&output.stdout).context("failed to parse hyprctl monitors JSON")?;
+    Ok(named.into_iter().map(|m| (m.name, m.dpms_status)).collect())
+}
+
+/// Runs `<program> eval <lua>`. Succeeds only when the process exits 0 and
+/// its trimmed stdout is exactly `ok`; otherwise the error carries the exit
+/// status, stdout and stderr.
+async fn hyprctl_eval(program: &OsStr, label: &str, lua: &str) -> Result<()> {
+    let output = Command::new(program)
+        .args(["eval", lua])
+        .output()
+        .await
+        .with_context(|| format!("{label} could not be run"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if output.status.success() && stdout == "ok" {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if is_missing_eval_extension(&format!("{stdout}\n{stderr}")) {
+        return Err(anyhow::anyhow!(
+            "breadmon: `hyprctl eval` (and the `hl.monitor()` Lua call it uses \
+             to apply monitor changes) is not available on this compositor. \
+             Live apply needs Hyprland configured with hyprland.lua; it is not \
+             available when Hyprland is configured with hyprland.conf. See the \
+             breadmon README for details. ({label} {}, stdout: {stdout:?}, stderr: {stderr:?})",
+            output.status
+        ));
+    }
+    Err(anyhow::anyhow!(
+        "{label} failed: {}, stdout: {stdout:?}, stderr: {stderr:?}",
+        output.status
+    ))
+}
+
+/// The Lua expression that sets DPMS `action` (`on` or `off`) for `monitor`.
+/// Hyprland configured with `hyprland.lua` parses `hyprctl dispatch` arguments
+/// as Lua, so the legacy `dispatch dpms off <name>` form fails there.
+/// `hl.dsp.dpms` takes `action` and `monitor` fields.
+fn dpms_expr(action: &str, monitor: &str) -> String {
+    let mut quoted = String::with_capacity(monitor.len() + 2);
+    quoted.push('\'');
+    for c in monitor.chars() {
+        match c {
+            '\\' => quoted.push_str("\\\\"),
+            '\'' => quoted.push_str("\\'"),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('\'');
+    format!("hl.dispatch(hl.dsp.dpms({{ action = '{action}', monitor = {quoted} }}))")
+}
+
+/// Hyprland configured with `hyprland.conf` has no `eval` request (it comes
+/// with the `hl.monitor()` Lua global used above, which needs `hyprland.lua`),
+/// and responds with an "unknown request" style message rather than an error
+/// about `hl`. Detect that case so we can point the user at the actual cause
+/// instead of surfacing the raw hyprctl text.
 fn is_missing_eval_extension(hyprctl_stdout: &str) -> bool {
     let s = hyprctl_stdout.to_lowercase();
     s.contains("unknown request") || s.contains("unknown command")
+}
+
+#[cfg(test)]
+mod fake_harness {
+    //! Fake-`hyprctl` scripts shared by the monitor tests.
+    //!
+    //! Every fake is created once, up front, under a process-wide
+    //! `OnceLock`, before any test execs one; afterwards tests only exec,
+    //! append to their eval log, and clean up. No test ever writes a
+    //! script while another test is spawning.
+    //!
+    //! Phase separation matters because unique paths alone do not stop
+    //! ETXTBSY here: exec'ing a freshly-written script while other
+    //! threads are concurrently writing (different) scripts fails with
+    //! "Text file busy" a few percent of the time on this kernel, even
+    //! though every path is unique and closed before exec (stress
+    //! reproduced at ~1-8% of spawns with plain `std::process::Command`).
+    //! Pre-created scripts exec'd under the same concurrency, with the
+    //! same log-append and cleanup churn, never fail. Each fake also gets
+    //! its own dir (pid + start time + ASLR address), so concurrent CI
+    //! jobs sharing the runner's `/tmp` never share a path, and each
+    //! eval log stays per-test.
+    use std::collections::HashMap;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    pub struct Fake {
+        pub dir: PathBuf,
+        pub script: PathBuf,
+        pub log: PathBuf,
+    }
+
+    const ALL_ON: &str =
+        r#"[{"name":"eDP-1","dpmsStatus":true},{"name":"HDMI-A-1","dpmsStatus":true}]"#;
+    const EDP_ON_HDMI_OFF: &str =
+        r#"[{"name":"eDP-1","dpmsStatus":true},{"name":"HDMI-A-1","dpmsStatus":false}]"#;
+    const SINGLE_ON: &str = r#"[{"name":"eDP-1","dpmsStatus":true}]"#;
+
+    /// (test name, shell body) for plain `eval` fakes.
+    const EVAL: &[(&str, &str)] = &[
+        ("ok0", "printf 'ok\\n'; exit 0"),
+        ("ws", "printf '  ok \\n'; exit 0"),
+        ("refuse0", "printf 'refused'; printf 'detail' >&2; exit 0"),
+        ("ok7", "printf 'ok\\n'; printf 'boom' >&2; exit 7"),
+        ("empty", "exit 0"),
+    ];
+
+    /// (test name, `monitors all -j` JSON, its exit code) for DPMS fakes.
+    /// The `eval` branch records each Lua argument in the test's log.
+    const DPMS: &[(&str, &str, i32)] = &[
+        ("unknown", ALL_ON, 0),
+        ("off", ALL_ON, 0),
+        ("noop", ALL_ON, 0),
+        ("restore", EDP_ON_HDMI_OFF, 0),
+        ("badquery", "[]", 3),
+        ("exit3", SINGLE_ON, 3),
+    ];
+
+    static FAKES: std::sync::OnceLock<HashMap<&'static str, Fake>> = std::sync::OnceLock::new();
+
+    fn setup() -> &'static HashMap<&'static str, Fake> {
+        FAKES.get_or_init(|| {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            // The static's address varies per process (ASLR); with pid and
+            // start time it separates concurrent jobs sharing /tmp, where
+            // pids can collide across containers.
+            let tag = format!(
+                "{}-{nanos}-{:x}",
+                std::process::id(),
+                &FAKES as *const std::sync::OnceLock<HashMap<&'static str, Fake>> as usize
+            );
+            let mut m = HashMap::new();
+            for (name, body) in EVAL {
+                let script = format!("#!/bin/sh\n{body}\n");
+                m.insert(*name, write_fake(&tag, name, &script));
+            }
+            for (name, monitors_json, monitors_exit) in DPMS {
+                m.insert(
+                    *name,
+                    write_dpms_fake(&tag, name, monitors_json, *monitors_exit),
+                );
+            }
+            m
+        })
+    }
+
+    fn write_fake(tag: &str, name: &str, script_body: &str) -> Fake {
+        let dir = std::env::temp_dir().join(format!("breadmon-fake-{tag}-{name}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("eval.log");
+        std::fs::write(&log, "").unwrap();
+        // Write-then-rename so the final path is never observed half-written.
+        let tmp = dir.join(".hyprctl.tmp");
+        std::fs::write(&tmp, script_body).unwrap();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = dir.join("hyprctl");
+        std::fs::rename(&tmp, &script).unwrap();
+        Fake { dir, script, log }
+    }
+
+    fn write_dpms_fake(tag: &str, name: &str, monitors_json: &str, monitors_exit: i32) -> Fake {
+        // The log is created first so its path can be baked into the script.
+        let dir = std::env::temp_dir().join(format!("breadmon-fake-{tag}-{name}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("eval.log");
+        std::fs::write(&log, "").unwrap();
+        let body = format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = monitors ]; then\n\
+               printf '%s' '{monitors_json}'\n\
+               exit {monitors_exit}\n\
+             fi\n\
+             printf '%s\\n' \"$2\" >> '{}'\n\
+             printf 'ok\\n'\n",
+            log.display()
+        );
+        let tmp = dir.join(".hyprctl.tmp");
+        std::fs::write(&tmp, body).unwrap();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = dir.join("hyprctl");
+        std::fs::rename(&tmp, &script).unwrap();
+        Fake { dir, script, log }
+    }
+
+    /// The pre-created fake for test `name`. Blocks until setup finishes,
+    /// so no caller execs while any script is still being written.
+    pub fn get(name: &'static str) -> &'static Fake {
+        &setup()[name]
+    }
+}
+
+#[cfg(test)]
+mod hyprctl_eval_tests {
+    use super::fake_harness;
+    use super::hyprctl_eval;
+    use std::ffi::OsString;
+
+    // Scripts are pre-created under a process-wide OnceLock (see
+    // fake_harness); tests only exec, so parallel tests need no locking.
+    async fn run(name: &'static str) -> anyhow::Result<()> {
+        let fake = fake_harness::get(name);
+        let result = hyprctl_eval(fake.script.as_os_str(), "hyprctl eval", "hl.dispatch(x)").await;
+        std::fs::remove_dir_all(&fake.dir).unwrap();
+        result
+    }
+
+    #[tokio::test]
+    async fn ok_with_exit_zero_succeeds() {
+        assert!(run("ok0").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn surrounding_whitespace_around_ok_is_trimmed() {
+        assert!(run("ws").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn refusal_with_exit_zero_is_an_error_with_stdout_and_stderr() {
+        let err = run("refuse0").await.unwrap_err().to_string();
+        assert!(err.contains("exit status: 0"), "{err}");
+        assert!(err.contains("refused"), "{err}");
+        assert!(err.contains("detail"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ok_with_nonzero_exit_is_an_error_with_exit_status() {
+        let err = run("ok7").await.unwrap_err().to_string();
+        assert!(err.contains("exit status: 7"), "{err}");
+        assert!(err.contains("boom"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn empty_output_with_exit_zero_is_an_error() {
+        assert!(run("empty").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn spawn_failure_is_an_error() {
+        let missing = OsString::from("/nonexistent/breadmon-no-hyprctl");
+        assert!(hyprctl_eval(&missing, "hyprctl eval", "x").await.is_err());
+    }
+}
+
+#[cfg(test)]
+mod dpms_apply_tests {
+    use super::fake_harness;
+    use super::{apply_monitors_with, Mode, Monitor, Transform};
+
+    // Fakes are pre-created under a process-wide OnceLock (see
+    // fake_harness); tests only exec, so parallel tests need no locking.
+
+    fn monitor(name: &str, dpms: bool) -> Monitor {
+        let mode = Mode {
+            width: 1920,
+            height: 1080,
+            refresh: 60.0,
+        };
+        Monitor {
+            name: name.into(),
+            description: String::new(),
+            active_mode: mode.clone(),
+            x: 0,
+            y: 0,
+            scale: 1.0,
+            transform: Transform::Normal,
+            vrr: false,
+            dpms,
+            disabled: false,
+            mirror_of: None,
+            available_modes: vec![mode],
+            physical_width_mm: 0,
+            physical_height_mm: 0,
+        }
+    }
+
+    async fn run(name: &'static str, monitors: &[Monitor]) -> (anyhow::Result<()>, String) {
+        let fake = fake_harness::get(name);
+        let result = apply_monitors_with(fake.script.as_os_str(), monitors).await;
+        let recorded = std::fs::read_to_string(&fake.log).unwrap_or_default();
+        std::fs::remove_dir_all(&fake.dir).unwrap();
+        (result, recorded)
+    }
+
+    #[tokio::test]
+    async fn unknown_monitor_name_is_an_error_and_no_dpms_is_dispatched() {
+        let monitors = [monitor("eDP-1", true), monitor("NOPE-9", false)];
+        let (result, recorded) = run("unknown", &monitors).await;
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("NOPE-9"), "{err}");
+        assert!(!recorded.contains("dpms"), "{recorded}");
+        assert!(!recorded.contains("hl.monitor"), "{recorded}");
+    }
+
+    #[tokio::test]
+    async fn known_monitor_off_dispatches_dpms_off_for_that_name_only() {
+        let monitors = [monitor("eDP-1", true), monitor("HDMI-A-1", false)];
+        let (result, recorded) = run("off", &monitors).await;
+        assert!(result.is_ok(), "{result:?}");
+        let dpms_lines: Vec<&str> = recorded.lines().filter(|l| l.contains("dpms")).collect();
+        assert_eq!(
+            dpms_lines,
+            ["hl.dispatch(hl.dsp.dpms({ action = 'off', monitor = 'HDMI-A-1' }))"]
+        );
+    }
+
+    #[tokio::test]
+    async fn already_on_monitor_gets_no_dpms_dispatch() {
+        let monitors = [monitor("eDP-1", true), monitor("HDMI-A-1", true)];
+        let (result, recorded) = run("noop", &monitors).await;
+        assert!(result.is_ok(), "{result:?}");
+        assert!(!recorded.contains("dpms"), "{recorded}");
+    }
+
+    #[tokio::test]
+    async fn known_monitor_restored_from_off_dispatches_dpms_on_for_that_name_only() {
+        let monitors = [monitor("eDP-1", true), monitor("HDMI-A-1", true)];
+        let (result, recorded) = run("restore", &monitors).await;
+        assert!(result.is_ok(), "{result:?}");
+        let dpms_lines: Vec<&str> = recorded.lines().filter(|l| l.contains("dpms")).collect();
+        assert_eq!(
+            dpms_lines,
+            ["hl.dispatch(hl.dsp.dpms({ action = 'on', monitor = 'HDMI-A-1' }))"]
+        );
+    }
+
+    #[tokio::test]
+    async fn monitors_query_failure_stops_before_any_dpms() {
+        let monitors = [monitor("eDP-1", false)];
+        let (result, recorded) = run("badquery", &monitors).await;
+        assert!(result.is_err());
+        assert!(recorded.is_empty(), "{recorded}");
+    }
+
+    #[tokio::test]
+    async fn monitors_query_nonzero_exit_with_valid_json_is_an_error() {
+        let monitors = [monitor("eDP-1", true)];
+        let (result, recorded) = run("exit3", &monitors).await;
+        assert!(result.is_err());
+        assert!(recorded.is_empty(), "{recorded}");
+    }
 }
 
 #[cfg(test)]
@@ -418,6 +774,30 @@ mod eval_extension_tests {
     fn detects_unknown_request() {
         assert!(is_missing_eval_extension("unknown request"));
         assert!(is_missing_eval_extension("Unknown Request"));
+    }
+
+    #[test]
+    fn dpms_off_targets_the_named_monitor() {
+        assert_eq!(
+            super::dpms_expr("off", "DP-1"),
+            "hl.dispatch(hl.dsp.dpms({ action = 'off', monitor = 'DP-1' }))"
+        );
+    }
+
+    #[test]
+    fn dpms_on_targets_the_named_monitor() {
+        assert_eq!(
+            super::dpms_expr("on", "DP-1"),
+            "hl.dispatch(hl.dsp.dpms({ action = 'on', monitor = 'DP-1' }))"
+        );
+    }
+
+    #[test]
+    fn dpms_expr_escapes_quotes_in_the_name() {
+        assert_eq!(
+            super::dpms_expr("off", "a'b\\c"),
+            "hl.dispatch(hl.dsp.dpms({ action = 'off', monitor = 'a\\'b\\\\c' }))"
+        );
     }
 
     #[test]
