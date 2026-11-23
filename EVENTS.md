@@ -36,6 +36,11 @@ If/when breadmon grows a headless apply path, the corresponding
 `bread.command.mon.apply` verb should be added at the same time, not
 stubbed out ahead of it.
 
+## Not implemented
+
+- No `bread.command.mon.*` verb exists. Apply, load, and save stay keyboard-driven; a headless apply path would add the verb and its confirmation event at the same time.
+- No `bread.mon.*` event reports profile load, profile save, TUI navigation, or monitor detection. Only a successful live apply is published.
+
 ## Fail-safe behavior
 
 - If breadd isn't installed or isn't running, `emit` is a silent no-op
