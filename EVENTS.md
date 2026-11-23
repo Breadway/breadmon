@@ -1,4 +1,4 @@
-# breadmon: bread event integration
+# mon: bread event integration
 
 breadmon is a standalone TUI monitor manager: it works exactly the same
 with or without `breadd` running. When breadd *is* present, a successful
