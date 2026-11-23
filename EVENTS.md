@@ -1,4 +1,4 @@
-# breadmon: bread event integration
+# mon: bread event integration
 
 breadmon is a standalone TUI monitor manager: it works exactly the same
 with or without `breadd` running. When breadd *is* present, a successful
@@ -35,6 +35,11 @@ a poor control surface. Apply, load, and save stay keyboard-driven.
 If/when breadmon grows a headless apply path, the corresponding
 `bread.command.mon.apply` verb should be added at the same time, not
 stubbed out ahead of it.
+
+## Not implemented
+
+- No `bread.command.mon.*` verb exists. Apply, load, and save stay keyboard-driven; a headless apply path would add the verb and its confirmation event at the same time.
+- No `bread.mon.*` event reports profile load, profile save, TUI navigation, or monitor detection. Only a successful live apply is published.
 
 ## Fail-safe behavior
 
